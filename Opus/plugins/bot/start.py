@@ -81,7 +81,7 @@ async def start_pm(client, message: Message, _):
     else:
         out = private_panel(_)
         await message.reply(
-            text="<blockquote><b><u>ᴅɪᴠᴇ ɪɴᴛᴏ ᴀ ᴍᴜꜱɪᴄᴀʟ ᴜɴɪᴠᴇʀꜱᴇ ✨</u>\n<u>ʏᴏᴜᴛᴜʙᴇ & ꜱᴘᴏᴛɪꜰʏ ꜱᴜᴘᴘᴏʀᴛ ꜰᴏʀ ʏᴏᴜʀ ᴜɴʟɪᴍɪᴛᴇᴅ ᴍᴜꜱɪᴄ ᴊᴏᴜʀɴᴇʏ</u>\nᴡɪᴛʜ @vortexbeats_bot, ʏᴏᴜ ᴄᴀɴ ꜱᴛʀᴇᴀᴍ ᴍᴜꜱɪᴄ ᴀɴʏᴛɪᴍᴇ, ᴀɴʏᴡʜᴇʀᴇ. 🕊</b></blockquote>\n<blockquote><b>Ɵᴘᴜs </b><a href={https://envs.sh/QE_.png}> ᴠ2.0</a></blockquote>",
+            text="<blockquote><b><u>ᴅɪᴠᴇ ɪɴᴛᴏ ᴀ ᴍᴜꜱɪᴄᴀʟ ᴜɴɪᴠᴇʀꜱᴇ ✨</u>\n<u>ʏᴏᴜᴛᴜʙᴇ & ꜱᴘᴏᴛɪꜰʏ ꜱᴜᴘᴘᴏʀᴛ ꜰᴏʀ ʏᴏᴜʀ ᴜɴʟɪᴍɪᴛᴇᴅ ᴍᴜꜱɪᴄ ᴊᴏᴜʀɴᴇʏ</u>\nᴡɪᴛʜ @vortexbeats_bot, ʏᴏᴜ ᴄᴀɴ ꜱᴛʀᴇᴀᴍ ᴍᴜꜱɪᴄ ᴀɴʏᴛɪᴍᴇ, ᴀɴʏᴡʜᴇʀᴇ. 🕊</b></blockquote>\n<blockquote><b>Ɵᴘᴜs </b><a href="https://envs.sh/QE_.png"> ᴠ2.0</a></blockquote>",
             reply_markup=InlineKeyboardMarkup(out),
         )
         if await is_on_off(2):
