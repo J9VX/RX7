@@ -172,57 +172,47 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
 
+        # First try standard quality (480p or best available)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "yt-dlp",
                 "--cookies", cookie_txt_file(),
                 "-g",
                 "-f",
-                "bestvideo[ext=mp4][height<=1080]+bestaudio[acodec=ec-3]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
+                "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
                 f"{link}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
             if stdout:
-                video_url = stdout.decode().split("\n")[0]
-                audio_url = stdout.decode().split("\n")[1] if len(stdout.decode().split("\n")) > 1 else None
-                return 1, video_url, audio_url
+                return 1, stdout.decode().split("\n")[0]
         except Exception as e:
-            logging.warning(f"[DA1] ꜰᴀɪʟᴇᴅ: {e}")
+            logging.warning(f"[STD] Failed to get standard quality: {e}")
         
-        quality_formats = [
-            "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
-            "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]",
-            "bestvideo[height<=720][width<=1280]+bestaudio/best",
-            "best[height<=720][width<=1280]"
-        ]
+        # Fallback to any available quality
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp",
+                "--cookies", cookie_txt_file(),
+                "-g",
+                "-f",
+                "bestvideo+bestaudio/best",
+                f"{link}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if stdout:
+                return 1, stdout.decode().split("\n")[0]
+        except Exception as e:
+            logging.warning(f"[FALLBACK] Failed to get any quality: {e}")
         
-        for quality in quality_formats:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "yt-dlp",
-                    "--cookies", cookie_txt_file(),
-                    "-g",
-                    "-f",
-                    quality,
-                    f"{link}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await proc.communicate()
-                if stdout:
-                    video_url = stdout.decode().split("\n")[0]
-                    audio_url = stdout.decode().split("\n")[1] if len(stdout.decode().split("\n")) > 1 else None
-                    return 1, video_url, audio_url
-            except Exception as e:
-                logging.warning(f"[HFA] ꜰᴇᴛᴄʜ ꜰᴀɪʟᴇᴅ: {quality}: {e}")
-        
-        # Final fallback
+        # Final fallback to API
         api_url = await get_stream_url(link, True)
         if api_url:
-            return 1, api_url, None
-        return 0, "[HFA] ꜰᴇᴛᴄʜ ꜰᴀɪʟᴇᴅ:", None
+            return 1, api_url
+        return 0, "[VID] Failed to fetch video URL"
 
     async def playlist(self, link, limit, user_id, videoid: Union[bool, str] = None):
         if videoid:
@@ -237,7 +227,7 @@ class YouTubeAPI:
             result = playlist.split("\n")
             return [key for key in result if key != ""]
         except Exception as e:
-            logging.warning(f"[PLY] ꜰᴇᴛᴄʜ ꜰᴀɪʟᴇᴅ:{e}")
+            logging.warning(f"[PLY] Failed to fetch playlist: {e}")
             return []
 
     async def track(self, link: str, videoid: Union[bool, str] = None):
@@ -274,13 +264,6 @@ class YouTubeAPI:
                 for format in r["formats"]:
                     try:
                         format_note = format.get("format_note", "").lower()
-                        acodec = format.get("acodec", "").lower()
-                        
-                        # (typically EC-3 or AC-4 codec with spatial audio)
-                        is_dolby_atmos = (("dash" in format_note or "atmos" in format_note) and 
-                                         acodec in ["ec-3", "ac-4"] and
-                                         format.get("dynamic_range", "").lower() in ["dolby-vision", "dolby-atmos"])
-                        
                         if "audio only" in format_note.lower():
                             formats_available.append({
                                 "format": format.get("format"),
@@ -291,9 +274,6 @@ class YouTubeAPI:
                                 "abr": format.get("abr", 0),
                                 "asr": format.get("asr", 0),
                                 "yturl": link,
-                                "is_dolby_atmos": is_dolby_atmos,
-                                "acodec": acodec,
-                                "dynamic_range": format.get("dynamic_range", ""),
                             })
                         else:
                             formats_available.append({
@@ -306,18 +286,14 @@ class YouTubeAPI:
                                 "width": format.get("width", 0),
                                 "fps": format.get("fps", 0),
                                 "yturl": link,
-                                "is_dolby_atmos": is_dolby_atmos,
-                                "acodec": acodec,
-                                "dynamic_range": format.get("dynamic_range", ""),
                             })
                     except:
                         continue
         except Exception as e:
-            logging.warning(f"[HFA] ꜰᴇᴛᴄʜ ꜰᴀɪʟᴇᴅ: {e}")
+            logging.warning(f"[FMT] Failed to fetch formats: {e}")
 
         formats_available.sort(
             key=lambda x: (
-                -x.get("is_dolby_atmos", False), 
                 x.get("height", 0) or x.get("abr", 0),
                 x.get("width", 0),
                 x.get("fps", 0),
@@ -355,7 +331,7 @@ class YouTubeAPI:
                 if songvideo:
                     def dl():
                         ydl_optssx = {
-                            "format": f"{format_id}+bestaudio",
+                            "format": f"{format_id}+bestaudio/best",
                             "outtmpl": f"downloads/{title}",
                             "geo_bypass": True,
                             "cookiefile": cookie_txt_file(),
@@ -377,109 +353,47 @@ class YouTubeAPI:
                 
                 elif songaudio:
                     def dl():
-                        try:
-                            ydl_optssx = {
-                                "format": "bestaudio[acodec=ec-3]/bestaudio[abr>=320]/bestaudio/best",
-                                "outtmpl": f"downloads/{title}.%(ext)s",
-                                "geo_bypass": True,
-                                "cookiefile": cookie_txt_file(),
-                                "nocheckcertificate": True,
-                                "quiet": True,
-                                "no_warnings": True,
-                                "prefer_ffmpeg": True,
-                                "postprocessors": [{
-                                    "key": "FFmpegExtractAudio",
-                                    "preferredcodec": "mp3",
-                                    "preferredquality": "320",
-                                }],
-                                "ffmpeg_location": "/usr/bin/ffmpeg",
-                                "audio-quality": "0",
-                            }
-                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
-                            info = ydl.extract_info(link, download=False)
-                            
-                            #  (EC-3 codec)
-                            if any(f.get('acodec', '').lower() == 'ec-3' for f in info.get('formats', [])):
-                                ydl_optssx["format"] = "bestaudio[acodec=ec-3]"
-                                ydl_optssx["postprocessors"][0]["preferredcodec"] = "m4a" 
-                                ydl = yt_dlp.YoutubeDL(ydl_optssx)
-                                path = os.path.join("downloads", f"{title}.m4a")
-                                if not os.path.exists(path):
-                                    ydl.download([link])
-                                return path, True
-                            
-                            if any(f.get('abr', 0) >= 320 for f in info.get('formats', [])):
-                                ydl.download([link])
-                                return f"downloads/{title}.mp3"
-                            
-                            # Final fallback
-                            ydl_optssx["format"] = "bestaudio/best"
-                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
-                            ydl.download([link])
-                            return f"downloads/{title}.mp3"
-                        except Exception as e:
-                            logging.warning(f"[DA1] ꜰᴀɪʟᴇᴅ:{e}")
-                            
-                            ydl_optssx = {
-                                "format": "bestaudio/best",
-                                "outtmpl": f"downloads/{title}.%(ext)s",
-                                "geo_bypass": True,
-                                "cookiefile": cookie_txt_file(),
-                                "nocheckcertificate": True,
-                                "quiet": True,
-                                "no_warnings": True,
-                                "prefer_ffmpeg": True,
-                                "postprocessors": [{
-                                    "key": "FFmpegExtractAudio",
-                                    "preferredcodec": "mp3",
-                                    "preferredquality": "0",
-                                }],
-                                "ffmpeg_location": "/usr/bin/ffmpeg"
-                            }
-                            yt_dlp.YoutubeDL(ydl_optssx).download([link])
-                            return f"downloads/{title}.mp3"
+                        ydl_optssx = {
+                            "format": "bestaudio/best",
+                            "outtmpl": f"downloads/{title}.%(ext)s",
+                            "geo_bypass": True,
+                            "cookiefile": cookie_txt_file(),
+                            "nocheckcertificate": True,
+                            "quiet": True,
+                            "no_warnings": True,
+                            "prefer_ffmpeg": True,
+                            "postprocessors": [{
+                                "key": "FFmpegExtractAudio",
+                                "preferredcodec": "mp3",
+                                "preferredquality": "192",
+                            }],
+                            "ffmpeg_location": "/usr/bin/ffmpeg"
+                        }
+                        yt_dlp.YoutubeDL(ydl_optssx).download([link])
+                        return f"downloads/{title}.mp3"
                     
                     return await loop.run_in_executor(None, dl)
                 
                 elif video:
                     if await is_on_off(1):
                         def dl():
-                            try:
-                                ydl_optssx = {
-                                    "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[acodec=ec-3]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
-                                    "outtmpl": "downloads/%(id)s.%(ext)s",
-                                    "geo_bypass": True,
-                                    "cookiefile": cookie_txt_file(),
-                                    "nocheckcertificate": True,
-                                    "quiet": True,
-                                    "no_warnings": True,
-                                    "ffmpeg_location": "/usr/bin/ffmpeg",
-                                    "merge_output_format": "mp4"
-                                }
-                                x = yt_dlp.YoutubeDL(ydl_optssx)
-                                info = x.extract_info(link, False)
-                                path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-                                if not os.path.exists(path):
-                                    x.download([link])
-                                return path, True
-                            except Exception as e:
-                                logging.warning(f"[DA1] ꜰᴀɪʟᴇᴅ: {e}")
-                                ydl_optssx = {
-                                    "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
-                                    "outtmpl": "downloads/%(id)s.%(ext)s",
-                                    "geo_bypass": True,
-                                    "cookiefile": cookie_txt_file(),
-                                    "nocheckcertificate": True,
-                                    "quiet": True,
-                                    "no_warnings": True,
-                                    "ffmpeg_location": "/usr/bin/ffmpeg"
-                                }
-                                x = yt_dlp.YoutubeDL(ydl_optssx)
-                                info = x.extract_info(link, False)
-                                path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-                                if not os.path.exists(path):
-                                    x.download([link])
-                                return path, True
+                            ydl_optssx = {
+                                "format": "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
+                                "outtmpl": "downloads/%(id)s.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "ffmpeg_location": "/usr/bin/ffmpeg",
+                                "merge_output_format": "mp4"
+                            }
+                            x = yt_dlp.YoutubeDL(ydl_optssx)
+                            info = x.extract_info(link, False)
+                            path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+                            if not os.path.exists(path):
+                                x.download([link])
+                            return path, True
                         
                         return await loop.run_in_executor(None, dl)
                     else:
@@ -488,22 +402,20 @@ class YouTubeAPI:
                             "--cookies", cookie_txt_file(),
                             "-g",
                             "-f",
-                            "bestvideo[ext=mp4][height<=1080]+bestaudio[acodec=ec-3]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
+                            "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
                             f"{link}",
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
                         )
                         stdout, stderr = await proc.communicate()
                         if stdout:
-                            video_url = stdout.decode().split("\n")[0]
-                            audio_url = stdout.decode().split("\n")[1] if len(stdout.decode().split("\n")) > 1 else None
-                            return video_url, audio_url, False
+                            return stdout.decode().split("\n")[0], False
                         
                         file_size = await check_file_size(link)
                         if file_size and (file_size / (1024 * 1024)) <= 250:
                             def dl():
                                 ydl_optssx = {
-                                    "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
+                                    "format": "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
                                     "outtmpl": "downloads/%(id)s.%(ext)s",
                                     "geo_bypass": True,
                                     "cookiefile": cookie_txt_file(),
@@ -523,78 +435,32 @@ class YouTubeAPI:
                 
                 else: 
                     def dl():
-                        # [DA1] Mode Fch
-                        try:
-                            ydl_optssx = {
-                                "format": "bestaudio[acodec=ec-3]/bestaudio[abr>=320]/bestaudio/best",
-                                "outtmpl": "downloads/%(id)s.%(ext)s",
-                                "geo_bypass": True,
-                                "cookiefile": cookie_txt_file(),
-                                "nocheckcertificate": True,
-                                "quiet": True,
-                                "no_warnings": True,
-                                "postprocessors": [{
-                                    "key": "FFmpegExtractAudio",
-                                    "preferredcodec": "m4a", 
-                                    "preferredquality": "0",
-                                }],
-                                "ffmpeg_location": "/usr/bin/ffmpeg",
-                                "audio-quality": "0",
-                            }
-                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
-                            info = ydl.extract_info(link, download=False)
-                            
-                            # Check for Dolby Atmos
-                            if any(f.get('acodec', '').lower() == 'ec-3' for f in info.get('formats', [])):
-                                path = os.path.join("downloads", f"{info['id']}.m4a")
-                                if not os.path.exists(path):
-                                    ydl.download([link])
-                                return path, True
-                            
-                            if any(f.get('abr', 0) >= 320 for f in info.get('formats', [])):
-                                ydl_optssx["postprocessors"][0]["preferredcodec"] = "mp3"
-                                ydl_optssx["postprocessors"][0]["preferredquality"] = "320"
-                                ydl = yt_dlp.YoutubeDL(ydl_optssx)
-                                path = os.path.join("downloads", f"{info['id']}.mp3")
-                                if not os.path.exists(path):
-                                    ydl.download([link])
-                                return path, True
-                                
-                            ydl_optssx["format"] = "bestaudio/best"
-                            ydl_optssx["postprocessors"][0]["preferredquality"] = "0"
-                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
-                            path = os.path.join("downloads", f"{info['id']}.mp3")
-                            if not os.path.exists(path):
-                                ydl.download([link])
-                            return path, True
-                        except Exception as e:
-                            logging.warning(f"[DA1] ᴅᴏᴡɴʟᴏᴀᴅ ꜰᴀɪʟᴇᴅ: {e}")
-                            ydl_optssx = {
-                                "format": "bestaudio/best",
-                                "outtmpl": "downloads/%(id)s.%(ext)s",
-                                "geo_bypass": True,
-                                "cookiefile": cookie_txt_file(),
-                                "nocheckcertificate": True,
-                                "quiet": True,
-                                "no_warnings": True,
-                                "postprocessors": [{
-                                    "key": "FFmpegExtractAudio",
-                                    "preferredcodec": "mp3",
-                                    "preferredquality": "0",
-                                }],
-                                "ffmpeg_location": "/usr/bin/ffmpeg"
-                            }
-                            x = yt_dlp.YoutubeDL(ydl_optssx)
-                            info = x.extract_info(link, False)
-                            path = os.path.join("downloads", f"{info['id']}.mp3")
-                            if not os.path.exists(path):
-                                x.download([link])
-                            return path, True
+                        ydl_optssx = {
+                            "format": "bestaudio/best",
+                            "outtmpl": "downloads/%(id)s.%(ext)s",
+                            "geo_bypass": True,
+                            "cookiefile": cookie_txt_file(),
+                            "nocheckcertificate": True,
+                            "quiet": True,
+                            "no_warnings": True,
+                            "postprocessors": [{
+                                "key": "FFmpegExtractAudio",
+                                "preferredcodec": "mp3",
+                                "preferredquality": "192",
+                            }],
+                            "ffmpeg_location": "/usr/bin/ffmpeg"
+                        }
+                        x = yt_dlp.YoutubeDL(ydl_optssx)
+                        info = x.extract_info(link, False)
+                        path = os.path.join("downloads", f"{info['id']}.mp3")
+                        if not os.path.exists(path):
+                            x.download([link])
+                        return path, True
                     
                     return await loop.run_in_executor(None, dl)
             
             except Exception as e:
-                logging.warning(f"[F1] ꜰᴇᴛᴄʜ ꜰᴀɪʟᴇᴅ: {e}")
+                logging.warning(f"[DL] Download failed: {e}")
                 return None
         
         result = await try_cookie_download()
