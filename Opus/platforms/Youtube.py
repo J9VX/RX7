@@ -171,15 +171,15 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-
-        # First try standard video (480p) with best possible audio
+            
+        # First try with cookies (EXACT CODE FROM PROVIDED EXAMPLE)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "yt-dlp",
                 "--cookies", cookie_txt_file(),
                 "-g",
                 "-f",
-                "bestvideo[height<=480][ext=mp4]+bestaudio[acodec=opus]/bestvideo[height<=480]+bestaudio/best",
+                "best[height<=?720][width<=?1280]",
                 f"{link}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -188,31 +188,13 @@ class YouTubeAPI:
             if stdout:
                 return 1, stdout.decode().split("\n")[0]
         except Exception as e:
-            logging.warning(f"[STD] Failed to get standard quality with best audio: {e}")
+            logging.warning(f"Cookie-based video fetch failed: {e}")
         
-        # Fallback to any available quality
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "yt-dlp",
-                "--cookies", cookie_txt_file(),
-                "-g",
-                "-f",
-                "bestvideo+bestaudio/best",
-                f"{link}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            if stdout:
-                return 1, stdout.decode().split("\n")[0]
-        except Exception as e:
-            logging.warning(f"[FALLBACK] Failed to get any quality: {e}")
-        
-        # Final fallback to API
+        # Fallback to API
         api_url = await get_stream_url(link, True)
         if api_url:
             return 1, api_url
-        return 0, "[VID] Failed to fetch video URL"
+        return 0, "Failed to fetch video URL"
 
     async def playlist(self, link, limit, user_id, videoid: Union[bool, str] = None):
         if videoid:
@@ -454,7 +436,7 @@ class YouTubeAPI:
                             "--cookies", cookie_txt_file(),
                             "-g",
                             "-f",
-                            "bestvideo[height<=480][ext=mp4]+bestaudio[acodec=opus]/bestvideo[height<=480]+bestaudio/best",
+                            "best[height<=?720][width<=?1280]",
                             f"{link}",
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
