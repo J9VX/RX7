@@ -173,6 +173,25 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
         
+        # First try to get Dolby Atmos video if available
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp",
+                "--cookies", cookie_txt_file(),
+                "-g",
+                "-f",
+                "bestvideo[ext=mp4][height<=1080]+bestaudio[acodec=ec-3]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
+                f"{link}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if stdout:
+                return 1, stdout.decode().split("\n")[0]
+        except Exception as e:
+            logging.warning(f"Dolby Atmos video fetch failed: {e}")
+        
+        # Fallback to regular quality formats
         quality_formats = [
             "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
             "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]",
@@ -198,7 +217,7 @@ class YouTubeAPI:
             except Exception as e:
                 logging.warning(f"Video fetch failed with {quality}: {e}")
         
-        # Fallback to API
+        # Final fallback to API
         api_url = await get_stream_url(link, True)
         if api_url:
             return 1, api_url
@@ -253,16 +272,27 @@ class YouTubeAPI:
                 r = ydl.extract_info(link, download=False)
                 for format in r["formats"]:
                     try:
-                        if "audio only" in format.get("format_note", "").lower():
+                        format_note = format.get("format_note", "").lower()
+                        acodec = format.get("acodec", "").lower()
+                        
+                        # Detect Dolby Atmos (typically EC-3 or AC-4 codec with spatial audio)
+                        is_dolby_atmos = (("dash" in format_note or "atmos" in format_note) and 
+                                         acodec in ["ec-3", "ac-4"] and
+                                         format.get("dynamic_range", "").lower() in ["dolby-vision", "dolby-atmos"])
+                        
+                        if "audio only" in format_note.lower():
                             formats_available.append({
                                 "format": format.get("format"),
                                 "filesize": format.get("filesize"),
                                 "format_id": format.get("format_id"),
                                 "ext": format.get("ext"),
                                 "format_note": format.get("format_note"),
-                                "abr": format.get("abr", 0),  # Audio bitrate
-                                "asr": format.get("asr", 0),  # Audio sample rate
+                                "abr": format.get("abr", 0),
+                                "asr": format.get("asr", 0),
                                 "yturl": link,
+                                "is_dolby_atmos": is_dolby_atmos,
+                                "acodec": acodec,
+                                "dynamic_range": format.get("dynamic_range", ""),
                             })
                         else:
                             formats_available.append({
@@ -275,14 +305,19 @@ class YouTubeAPI:
                                 "width": format.get("width", 0),
                                 "fps": format.get("fps", 0),
                                 "yturl": link,
+                                "is_dolby_atmos": is_dolby_atmos,
+                                "acodec": acodec,
+                                "dynamic_range": format.get("dynamic_range", ""),
                             })
                     except:
                         continue
         except Exception as e:
             logging.warning(f"Formats fetch failed: {e}")
 
+        # Sort formats with Dolby Atmos first, then by quality
         formats_available.sort(
             key=lambda x: (
+                -x.get("is_dolby_atmos", False),  # Dolby Atmos first
                 x.get("height", 0) or x.get("abr", 0),
                 x.get("width", 0),
                 x.get("fps", 0),
@@ -342,10 +377,10 @@ class YouTubeAPI:
                 
                 elif songaudio:
                     def dl():
-                        # 320kbps
+                        # First try to get Dolby Atmos audio if available
                         try:
                             ydl_optssx = {
-                                "format": "bestaudio[abr>=320]/bestaudio/best",
+                                "format": "bestaudio[acodec=ec-3]/bestaudio[abr>=320]/bestaudio/best",
                                 "outtmpl": f"downloads/{title}.%(ext)s",
                                 "geo_bypass": True,
                                 "cookiefile": cookie_txt_file(),
@@ -359,25 +394,34 @@ class YouTubeAPI:
                                     "preferredquality": "320",
                                 }],
                                 "ffmpeg_location": "/usr/bin/ffmpeg",
-                                "audio-quality": "0",  # Best 
-                                "extract-audio": True,
+                                "audio-quality": "0",
                             }
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
                             info = ydl.extract_info(link, download=False)
                             
-                            # 320kbps
+                            # Check for Dolby Atmos (EC-3 codec)
+                            if any(f.get('acodec', '').lower() == 'ec-3' for f in info.get('formats', [])):
+                                ydl_optssx["format"] = "bestaudio[acodec=ec-3]"
+                                ydl_optssx["postprocessors"][0]["preferredcodec"] = "m4a"  # Keep original format for Atmos
+                                ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                                path = os.path.join("downloads", f"{title}.m4a")
+                                if not os.path.exists(path):
+                                    ydl.download([link])
+                                return path, True
+                            
+                            # Fallback to high quality audio
                             if any(f.get('abr', 0) >= 320 for f in info.get('formats', [])):
                                 ydl.download([link])
                                 return f"downloads/{title}.mp3"
                             
-                            # Fallback to highest
+                            # Final fallback
                             ydl_optssx["format"] = "bestaudio/best"
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
                             ydl.download([link])
                             return f"downloads/{title}.mp3"
                         except Exception as e:
-                            logging.warning(f"High quality audio download failed: {e}")
-                            # Final fallback
+                            logging.warning(f"Dolby Atmos audio download failed: {e}")
+                            # Standard fallback
                             ydl_optssx = {
                                 "format": "bestaudio/best",
                                 "outtmpl": f"downloads/{title}.%(ext)s",
@@ -390,7 +434,7 @@ class YouTubeAPI:
                                 "postprocessors": [{
                                     "key": "FFmpegExtractAudio",
                                     "preferredcodec": "mp3",
-                                    "preferredquality": "0",  # Better
+                                    "preferredquality": "0",
                                 }],
                                 "ffmpeg_location": "/usr/bin/ffmpeg"
                             }
@@ -402,31 +446,53 @@ class YouTubeAPI:
                 elif video:
                     if await is_on_off(1):
                         def dl():
-                            ydl_optssx = {
-                                "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
-                                "outtmpl": "downloads/%(id)s.%(ext)s",
-                                "geo_bypass": True,
-                                "cookiefile": cookie_txt_file(),
-                                "nocheckcertificate": True,
-                                "quiet": True,
-                                "no_warnings": True,
-                                "ffmpeg_location": "/usr/bin/ffmpeg"
-                            }
-                            x = yt_dlp.YoutubeDL(ydl_optssx)
-                            info = x.extract_info(link, False)
-                            path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-                            if not os.path.exists(path):
-                                x.download([link])
-                            return path, True
+                            # Try Dolby Atmos video first
+                            try:
+                                ydl_optssx = {
+                                    "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[acodec=ec-3]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
+                                    "outtmpl": "downloads/%(id)s.%(ext)s",
+                                    "geo_bypass": True,
+                                    "cookiefile": cookie_txt_file(),
+                                    "nocheckcertificate": True,
+                                    "quiet": True,
+                                    "no_warnings": True,
+                                    "ffmpeg_location": "/usr/bin/ffmpeg",
+                                    "merge_output_format": "mp4"
+                                }
+                                x = yt_dlp.YoutubeDL(ydl_optssx)
+                                info = x.extract_info(link, False)
+                                path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+                                if not os.path.exists(path):
+                                    x.download([link])
+                                return path, True
+                            except Exception as e:
+                                logging.warning(f"Dolby Atmos video download failed, falling back to standard: {e}")
+                                ydl_optssx = {
+                                    "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
+                                    "outtmpl": "downloads/%(id)s.%(ext)s",
+                                    "geo_bypass": True,
+                                    "cookiefile": cookie_txt_file(),
+                                    "nocheckcertificate": True,
+                                    "quiet": True,
+                                    "no_warnings": True,
+                                    "ffmpeg_location": "/usr/bin/ffmpeg"
+                                }
+                                x = yt_dlp.YoutubeDL(ydl_optssx)
+                                info = x.extract_info(link, False)
+                                path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+                                if not os.path.exists(path):
+                                    x.download([link])
+                                return path, True
                         
                         return await loop.run_in_executor(None, dl)
                     else:
+                        # Try to get Dolby Atmos stream first
                         proc = await asyncio.create_subprocess_exec(
                             "yt-dlp",
                             "--cookies", cookie_txt_file(),
                             "-g",
                             "-f",
-                            "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
+                            "bestvideo[ext=mp4][height<=1080]+bestaudio[acodec=ec-3]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
                             f"{link}",
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
@@ -459,11 +525,10 @@ class YouTubeAPI:
                 
                 else: 
                     def dl():
-                        # Multi-stage
+                        # Try Dolby Atmos audio first
                         try:
-          
                             ydl_optssx = {
-                                "format": "bestaudio[abr>=320]/bestaudio/best",
+                                "format": "bestaudio[acodec=ec-3]/bestaudio[abr>=320]/bestaudio/best",
                                 "outtmpl": "downloads/%(id)s.%(ext)s",
                                 "geo_bypass": True,
                                 "cookiefile": cookie_txt_file(),
@@ -472,22 +537,33 @@ class YouTubeAPI:
                                 "no_warnings": True,
                                 "postprocessors": [{
                                     "key": "FFmpegExtractAudio",
-                                    "preferredcodec": "mp3",
-                                    "preferredquality": "320",
+                                    "preferredcodec": "m4a",  # Keep original format for Atmos
+                                    "preferredquality": "0",
                                 }],
                                 "ffmpeg_location": "/usr/bin/ffmpeg",
                                 "audio-quality": "0",
                             }
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
                             info = ydl.extract_info(link, download=False)
-                       
+                            
+                            # Check for Dolby Atmos
+                            if any(f.get('acodec', '').lower() == 'ec-3' for f in info.get('formats', [])):
+                                path = os.path.join("downloads", f"{info['id']}.m4a")
+                                if not os.path.exists(path):
+                                    ydl.download([link])
+                                return path, True
+                            
+                            # Fallback to high quality audio
                             if any(f.get('abr', 0) >= 320 for f in info.get('formats', [])):
+                                ydl_optssx["postprocessors"][0]["preferredcodec"] = "mp3"
+                                ydl_optssx["postprocessors"][0]["preferredquality"] = "320"
+                                ydl = yt_dlp.YoutubeDL(ydl_optssx)
                                 path = os.path.join("downloads", f"{info['id']}.mp3")
                                 if not os.path.exists(path):
                                     ydl.download([link])
                                 return path, True
                             
-        
+                            # Final fallback
                             ydl_optssx["format"] = "bestaudio/best"
                             ydl_optssx["postprocessors"][0]["preferredquality"] = "0"
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
@@ -496,7 +572,7 @@ class YouTubeAPI:
                                 ydl.download([link])
                             return path, True
                         except Exception as e:
-                            logging.warning(f"High quality audio download failed: {e}")
+                            logging.warning(f"Dolby Atmos audio download failed: {e}")
                             ydl_optssx = {
                                 "format": "bestaudio/best",
                                 "outtmpl": "downloads/%(id)s.%(ext)s",
