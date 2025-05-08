@@ -172,14 +172,14 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
 
-        # First try standard quality (480p or best available)
+        # First try standard video (480p) with best possible audio
         try:
             proc = await asyncio.create_subprocess_exec(
                 "yt-dlp",
                 "--cookies", cookie_txt_file(),
                 "-g",
                 "-f",
-                "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
+                "bestvideo[height<=480][ext=mp4]+bestaudio[acodec=opus]/bestvideo[height<=480]+bestaudio/best",
                 f"{link}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -188,7 +188,7 @@ class YouTubeAPI:
             if stdout:
                 return 1, stdout.decode().split("\n")[0]
         except Exception as e:
-            logging.warning(f"[STD] Failed to get standard quality: {e}")
+            logging.warning(f"[STD] Failed to get standard quality with best audio: {e}")
         
         # Fallback to any available quality
         try:
@@ -264,6 +264,15 @@ class YouTubeAPI:
                 for format in r["formats"]:
                     try:
                         format_note = format.get("format_note", "").lower()
+                        acodec = format.get("acodec", "").lower()
+                        
+                        # Prioritize high-quality audio formats
+                        is_high_quality_audio = (
+                            "audio only" in format_note and 
+                            acodec in ["opus", "flac", "alac"] or
+                            format.get("abr", 0) >= 256
+                        )
+                        
                         if "audio only" in format_note.lower():
                             formats_available.append({
                                 "format": format.get("format"),
@@ -274,6 +283,8 @@ class YouTubeAPI:
                                 "abr": format.get("abr", 0),
                                 "asr": format.get("asr", 0),
                                 "yturl": link,
+                                "is_high_quality": is_high_quality_audio,
+                                "acodec": acodec,
                             })
                         else:
                             formats_available.append({
@@ -292,8 +303,10 @@ class YouTubeAPI:
         except Exception as e:
             logging.warning(f"[FMT] Failed to fetch formats: {e}")
 
+        # Sort formats - prioritize high quality audio and standard video
         formats_available.sort(
             key=lambda x: (
+                -x.get("is_high_quality", False),
                 x.get("height", 0) or x.get("abr", 0),
                 x.get("width", 0),
                 x.get("fps", 0),
@@ -331,7 +344,7 @@ class YouTubeAPI:
                 if songvideo:
                     def dl():
                         ydl_optssx = {
-                            "format": f"{format_id}+bestaudio/best",
+                            "format": f"{format_id}+bestaudio[acodec=opus]/best",
                             "outtmpl": f"downloads/{title}",
                             "geo_bypass": True,
                             "cookiefile": cookie_txt_file(),
@@ -353,24 +366,63 @@ class YouTubeAPI:
                 
                 elif songaudio:
                     def dl():
-                        ydl_optssx = {
-                            "format": "bestaudio/best",
-                            "outtmpl": f"downloads/{title}.%(ext)s",
-                            "geo_bypass": True,
-                            "cookiefile": cookie_txt_file(),
-                            "nocheckcertificate": True,
-                            "quiet": True,
-                            "no_warnings": True,
-                            "prefer_ffmpeg": True,
-                            "postprocessors": [{
-                                "key": "FFmpegExtractAudio",
-                                "preferredcodec": "mp3",
-                                "preferredquality": "192",
-                            }],
-                            "ffmpeg_location": "/usr/bin/ffmpeg"
-                        }
-                        yt_dlp.YoutubeDL(ydl_optssx).download([link])
-                        return f"downloads/{title}.mp3"
+                        # First try highest quality audio formats
+                        try:
+                            ydl_optssx = {
+                                "format": "bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio[abr>=320]/bestaudio/best",
+                                "outtmpl": f"downloads/{title}.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "prefer_ffmpeg": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "opus",
+                                    "preferredquality": "0",
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg",
+                            }
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            info = ydl.extract_info(link, download=False)
+                            
+                            # Check for Opus (highest quality)
+                            if any(f.get('acodec', '').lower() == 'opus' for f in info.get('formats', [])):
+                                path = os.path.join("downloads", f"{title}.opus")
+                                if not os.path.exists(path):
+                                    ydl.download([link])
+                                return path, True
+                            
+                            # Fallback to 320kbps MP3
+                            ydl_optssx["postprocessors"][0]["preferredcodec"] = "mp3"
+                            ydl_optssx["postprocessors"][0]["preferredquality"] = "320"
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            path = os.path.join("downloads", f"{title}.mp3")
+                            if not os.path.exists(path):
+                                ydl.download([link])
+                            return path, True
+                        except Exception as e:
+                            logging.warning(f"[AUDIO] Failed to get high quality audio: {e}")
+                            # Final fallback
+                            ydl_optssx = {
+                                "format": "bestaudio/best",
+                                "outtmpl": f"downloads/{title}.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "prefer_ffmpeg": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3",
+                                    "preferredquality": "192",
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg"
+                            }
+                            yt_dlp.YoutubeDL(ydl_optssx).download([link])
+                            return f"downloads/{title}.mp3", True
                     
                     return await loop.run_in_executor(None, dl)
                 
@@ -378,7 +430,7 @@ class YouTubeAPI:
                     if await is_on_off(1):
                         def dl():
                             ydl_optssx = {
-                                "format": "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
+                                "format": "bestvideo[height<=480][ext=mp4]+bestaudio[acodec=opus]/bestvideo[height<=480]+bestaudio/best",
                                 "outtmpl": "downloads/%(id)s.%(ext)s",
                                 "geo_bypass": True,
                                 "cookiefile": cookie_txt_file(),
@@ -402,7 +454,7 @@ class YouTubeAPI:
                             "--cookies", cookie_txt_file(),
                             "-g",
                             "-f",
-                            "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
+                            "bestvideo[height<=480][ext=mp4]+bestaudio[acodec=opus]/bestvideo[height<=480]+bestaudio/best",
                             f"{link}",
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
@@ -415,7 +467,7 @@ class YouTubeAPI:
                         if file_size and (file_size / (1024 * 1024)) <= 250:
                             def dl():
                                 ydl_optssx = {
-                                    "format": "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]",
+                                    "format": "bestvideo[height<=480][ext=mp4]+bestaudio/best",
                                     "outtmpl": "downloads/%(id)s.%(ext)s",
                                     "geo_bypass": True,
                                     "cookiefile": cookie_txt_file(),
@@ -435,27 +487,65 @@ class YouTubeAPI:
                 
                 else: 
                     def dl():
-                        ydl_optssx = {
-                            "format": "bestaudio/best",
-                            "outtmpl": "downloads/%(id)s.%(ext)s",
-                            "geo_bypass": True,
-                            "cookiefile": cookie_txt_file(),
-                            "nocheckcertificate": True,
-                            "quiet": True,
-                            "no_warnings": True,
-                            "postprocessors": [{
-                                "key": "FFmpegExtractAudio",
-                                "preferredcodec": "mp3",
-                                "preferredquality": "192",
-                            }],
-                            "ffmpeg_location": "/usr/bin/ffmpeg"
-                        }
-                        x = yt_dlp.YoutubeDL(ydl_optssx)
-                        info = x.extract_info(link, False)
-                        path = os.path.join("downloads", f"{info['id']}.mp3")
-                        if not os.path.exists(path):
-                            x.download([link])
-                        return path, True
+                        # Audio-only download with highest quality priority
+                        try:
+                            ydl_optssx = {
+                                "format": "bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio[abr>=320]/bestaudio/best",
+                                "outtmpl": "downloads/%(id)s.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "opus",
+                                    "preferredquality": "0",
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg",
+                            }
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            info = ydl.extract_info(link, download=False)
+                            
+                            # Check for Opus (highest quality)
+                            if any(f.get('acodec', '').lower() == 'opus' for f in info.get('formats', [])):
+                                path = os.path.join("downloads", f"{info['id']}.opus")
+                                if not os.path.exists(path):
+                                    ydl.download([link])
+                                return path, True
+                            
+                            # Fallback to 320kbps MP3
+                            ydl_optssx["postprocessors"][0]["preferredcodec"] = "mp3"
+                            ydl_optssx["postprocessors"][0]["preferredquality"] = "320"
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            path = os.path.join("downloads", f"{info['id']}.mp3")
+                            if not os.path.exists(path):
+                                ydl.download([link])
+                            return path, True
+                        except Exception as e:
+                            logging.warning(f"[AUDIO] Failed to get high quality audio: {e}")
+                            # Final fallback
+                            ydl_optssx = {
+                                "format": "bestaudio/best",
+                                "outtmpl": "downloads/%(id)s.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3",
+                                    "preferredquality": "192",
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg"
+                            }
+                            x = yt_dlp.YoutubeDL(ydl_optssx)
+                            info = x.extract_info(link, False)
+                            path = os.path.join("downloads", f"{info['id']}.mp3")
+                            if not os.path.exists(path):
+                                x.download([link])
+                            return path, True
                     
                     return await loop.run_in_executor(None, dl)
             
