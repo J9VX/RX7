@@ -344,24 +344,60 @@ class YouTubeAPI:
                 
                 elif songaudio:
                     def dl():
-                        ydl_optssx = {
-                            "format": "bestaudio/best",
-                            "outtmpl": f"downloads/{title}.%(ext)s",
-                            "geo_bypass": True,
-                            "cookiefile": cookie_txt_file(),
-                            "nocheckcertificate": True,
-                            "quiet": True,
-                            "no_warnings": True,
-                            "prefer_ffmpeg": True,
-                            "postprocessors": [{
-                                "key": "FFmpegExtractAudio",
-                                "preferredcodec": "mp3",
-                                "preferredquality": "320",
-                            }],
-                            "ffmpeg_location": "/usr/bin/ffmpeg"
-                        }
-                        yt_dlp.YoutubeDL(ydl_optssx).download([link])
-                        return f"downloads/{title}.mp3"
+                        # First try for 320kbps
+                        try:
+                            ydl_optssx = {
+                                "format": "bestaudio[abr>=320]/bestaudio/best",
+                                "outtmpl": f"downloads/{title}.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "prefer_ffmpeg": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3",
+                                    "preferredquality": "320",
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg",
+                                "audio-quality": "0",  # Best quality
+                                "extract-audio": True,
+                            }
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            info = ydl.extract_info(link, download=False)
+                            
+                            # Check if we got 320kbps
+                            if any(f.get('abr', 0) >= 320 for f in info.get('formats', [])):
+                                ydl.download([link])
+                                return f"downloads/{title}.mp3"
+                            
+                            # Fallback to highest available quality
+                            ydl_optssx["format"] = "bestaudio/best"
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            ydl.download([link])
+                            return f"downloads/{title}.mp3"
+                        except Exception as e:
+                            logging.warning(f"High quality audio download failed: {e}")
+                            # Final fallback to basic audio extraction
+                            ydl_optssx = {
+                                "format": "bestaudio/best",
+                                "outtmpl": f"downloads/{title}.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "prefer_ffmpeg": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3",
+                                    "preferredquality": "0",  # Best available
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg"
+                            }
+                            yt_dlp.YoutubeDL(ydl_optssx).download([link])
+                            return f"downloads/{title}.mp3"
                     
                     return await loop.run_in_executor(None, dl)
                 
@@ -425,27 +461,67 @@ class YouTubeAPI:
                 
                 else:  # Audio download
                     def dl():
-                        ydl_optssx = {
-                            "format": "bestaudio/best",
-                            "outtmpl": "downloads/%(id)s.%(ext)s",
-                            "geo_bypass": True,
-                            "cookiefile": cookie_txt_file(),
-                            "nocheckcertificate": True,
-                            "quiet": True,
-                            "no_warnings": True,
-                            "postprocessors": [{
-                                "key": "FFmpegExtractAudio",
-                                "preferredcodec": "mp3",
-                                "preferredquality": "320",
-                            }],
-                            "ffmpeg_location": "/usr/bin/ffmpeg"
-                        }
-                        x = yt_dlp.YoutubeDL(ydl_optssx)
-                        info = x.extract_info(link, False)
-                        path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-                        if not os.path.exists(path):
-                            x.download([link])
-                        return path, True
+                        # Multi-stage audio quality selection
+                        try:
+                            # First try for 320kbps
+                            ydl_optssx = {
+                                "format": "bestaudio[abr>=320]/bestaudio/best",
+                                "outtmpl": "downloads/%(id)s.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3",
+                                    "preferredquality": "320",
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg",
+                                "audio-quality": "0",
+                            }
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            info = ydl.extract_info(link, download=False)
+                            
+                            # Check if we got 320kbps
+                            if any(f.get('abr', 0) >= 320 for f in info.get('formats', [])):
+                                path = os.path.join("downloads", f"{info['id']}.mp3")
+                                if not os.path.exists(path):
+                                    ydl.download([link])
+                                return path, True
+                            
+                            # Fallback to highest available quality
+                            ydl_optssx["format"] = "bestaudio/best"
+                            ydl_optssx["postprocessors"][0]["preferredquality"] = "0"
+                            ydl = yt_dlp.YoutubeDL(ydl_optssx)
+                            path = os.path.join("downloads", f"{info['id']}.mp3")
+                            if not os.path.exists(path):
+                                ydl.download([link])
+                            return path, True
+                        except Exception as e:
+                            logging.warning(f"High quality audio download failed: {e}")
+                            # Final fallback
+                            ydl_optssx = {
+                                "format": "bestaudio/best",
+                                "outtmpl": "downloads/%(id)s.%(ext)s",
+                                "geo_bypass": True,
+                                "cookiefile": cookie_txt_file(),
+                                "nocheckcertificate": True,
+                                "quiet": True,
+                                "no_warnings": True,
+                                "postprocessors": [{
+                                    "key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3",
+                                    "preferredquality": "0",
+                                }],
+                                "ffmpeg_location": "/usr/bin/ffmpeg"
+                            }
+                            x = yt_dlp.YoutubeDL(ydl_optssx)
+                            info = x.extract_info(link, False)
+                            path = os.path.join("downloads", f"{info['id']}.mp3")
+                            if not os.path.exists(path):
+                                x.download([link])
+                            return path, True
                     
                     return await loop.run_in_executor(None, dl)
             
