@@ -1,10 +1,8 @@
 import time
-
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from youtubesearchpython.__future__ import VideosSearch
-
+from youtubesearchpython import VideosSearch
 import config
 from Opus import app
 from Opus.misc import _boot_
@@ -55,7 +53,6 @@ async def start_pm(client, message: Message, _):
                 title = result["title"]
                 duration = result["duration"]
                 views = result["viewCount"]["short"]
-                thumbnail = result["thumbnails"][0]["url"].split("?")[0]
                 channellink = result["channel"]["link"]
                 channel = result["channel"]["name"]
                 link = result["link"]
@@ -72,23 +69,22 @@ async def start_pm(client, message: Message, _):
                 ]
             )
             await m.delete()
-            await app.send_photo(
-                chat_id=message.chat.id,
-                photo=thumbnail,
-                caption=searched_text,
+            await message.reply(
+                text=searched_text,
                 reply_markup=key,
             )
             if await is_on_off(2):
                 return await app.send_message(
                     chat_id=config.LOGGER_ID,
                     text=f"<blockquote><b>» <a href='https://t.me/{message.from_user.username}'>ᴜsᴇʀ</a> ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ ᴛᴏ ᴄʜᴇᴄᴋ ᴛʀᴀᴄᴋ ɪɴғᴏʀᴍᴀᴛɪᴏɴ</b>\n<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code></blockquote>",
-                    disable_web_page_preview=True
+                    disable_web_page_preview=False
                 )
     else:
+        await message.reply_sticker("CAACAgUAAxkBAAKSRGgUiq7a6XfXos3Gb8QK830AAef2vAACcwcAAiRO8VXjkW9AnnwsLR4E")
+        
         out = private_panel(_)
-        await message.reply_photo(
-            photo=config.START_IMG_URL,
-            caption=_["start_2"].format(message.from_user.mention, app.mention),
+        await message.reply(
+            text='<blockquote><b><u>ᴅɪᴠᴇ ɪɴᴛᴏ ᴀ ᴍᴜꜱɪᴄᴀʟ ᴜɴɪᴠᴇʀꜱᴇ 🍁</u></b></blockquote>\n<blockquote><b>ɪ ᴡɪʟʟ ᴇʟᴇᴠᴀᴛᴇ ʏᴏᴜʀ ɢʀᴏᴜᴘ ᴠɪᴅᴇᴏ ᴄʜᴀᴛ ᴡɪᴛʜ ᴀᴡᴇsᴏᴍᴇ ᴍᴜsɪᴄ. ꜱᴛʀᴇᴀᴍ ᴍᴜꜱɪᴄ ᴀɴʏᴛɪᴍᴇ, ᴀɴʏᴡʜᴇʀᴇ\n/help ꜰᴏʀ ᴄᴏᴍᴍᴀɴᴅꜱ</b></blockquote>\n<blockquote><b>ꜰᴏʀ ᴜᴘᴅᴀᴛᴇꜱ @OpusAlertsBot\nƟᴘᴜs ᴠ2</b><a href="https://envs.sh/Pa1.mp4">.</a>0</blockquote>',
             reply_markup=InlineKeyboardMarkup(out),
         )
         if await is_on_off(2):
@@ -104,9 +100,8 @@ async def start_pm(client, message: Message, _):
 async def start_gp(client, message: Message, _):
     out = start_panel(_)
     uptime = int(time.time() - _boot_)
-    await message.reply_photo(
-        photo=config.START_IMG_URL,
-        caption=_["start_1"].format(app.mention, get_readable_time(uptime)),
+    await message.reply(
+        text=_["start_1"].format(app.mention, get_readable_time(uptime)),
         reply_markup=InlineKeyboardMarkup(out),
     )
     return await add_served_chat(message.chat.id)
@@ -139,9 +134,8 @@ async def welcome(client, message: Message):
                     return await app.leave_chat(message.chat.id)
 
                 out = start_panel(_)
-                await message.reply_photo(
-                    photo=config.START_IMG_URL,
-                    caption=_["start_3"].format(
+                await message.reply(
+                    text=_["start_3"].format(
                         message.from_user.first_name,
                         app.mention,
                         message.chat.title,
