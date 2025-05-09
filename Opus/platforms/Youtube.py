@@ -14,8 +14,10 @@ from youtubesearchpython.__future__ import VideosSearch
 from Opus.utils.database import is_on_off
 from Opus.utils.formatters import time_to_seconds
 
-API_URL = "http://46.250.243.87:1470/youtube"
-API_KEY = "1a873582a7c83342f961cc0a177b2b26"
+APIS = [
+    {"url": "http://46.250.243.87:1470/youtube", "key": "1a873582a7c83342f961cc0a177b2b26"},
+    {"url": "http://yt.sanatanixtech.site", "key": "SANATANIxTECH"}
+]
 
 def cookie_txt_file():
     folder_path = f"{os.getcwd()}/cookies"
@@ -28,68 +30,20 @@ def cookie_txt_file():
         file.write(f'Choosen File : {cookie_txt_file}\n')
     return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
 
-async def check_file_size(link):
-    async def get_format_info(link):
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--cookies", cookie_txt_file(),
-            "-J",
-            link,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            print(f'Error:\n{stderr.decode()}')
-            return None
-        return json.loads(stdout.decode())
-
-    def parse_size(formats):
-        total_size = 0
-        for format in formats:
-            if 'filesize' in format:
-                total_size += format['filesize']
-        return total_size
-
-    info = await get_format_info(link)
-    if info is None:
-        return None
-
-    formats = info.get('formats', [])
-    if not formats:
-        print("No formats found.")
-        return None
-
-    total_size = parse_size(formats)
-    return total_size
-
-async def shell_cmd(cmd):
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, errorz = await proc.communicate()
-    if errorz:
-        if "unavailable videos are hidden" in (errorz.decode("utf-8")).lower():
-            return out.decode("utf-8")
-        else:
-            return errorz.decode("utf-8")
-    return out.decode("utf-8")
-
 async def get_stream_url(query, video=False):
+    api = random.choice(APIS)  # Randomly select an API
     try:
         async with httpx.AsyncClient(timeout=60) as client:
-            params = {"query": query, "video": video, "api_key": API_KEY}
-            response = await client.get(API_URL, params=params)
+            params = {"query": query, "video": video, "api_key": api["key"]}
+            response = await client.get(api["url"], params=params)
             if response.status_code != 200:
                 return ""
             info = response.json()
-            return info.get("stream_url")
+            return info.get("stream_url", "")
     except Exception as e:
-        logging.error(f"API Error: {e}")
+        logging.error(f"API Error with {api['url']}: {e}")
         return ""
-
+        
 class YouTubeAPI:
     def __init__(self):
         self.base = "https://www.youtube.com/watch?v="
