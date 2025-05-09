@@ -33,7 +33,7 @@ async def join_watcher(_, message: Message):
                             [
                                 InlineKeyboardButton(
                                     "ᴀᴅᴅ ᴍᴇ",
-                                    url="https://t.me/StormMusicPlayer_bot?startgroup=true&admin=delete_messages+invite_users",
+                                    url="https://t.me/Recreation_1bot?startgroup=true&admin=delete_messages+invite_users",
                                 )
                             ]
                         ]
