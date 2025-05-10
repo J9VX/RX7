@@ -7,6 +7,7 @@ from pytgcalls.exceptions import NoActiveGroupCall
 
 import config
 from Opus import Apple, Resso, SoundCloud, Spotify, Telegram, YouTube, app
+from Opus import Platform
 from Opus.core.call import Anony
 from Opus.utils import seconds_to_min, time_to_seconds
 from Opus.utils.channelplay import get_channeplayCB
@@ -332,6 +333,74 @@ async def play_commnd(
                 mystic = await message.reply_text(err)
                 return
             return await mystic.delete()
+        # Saavn Streaming Integration
+        elif await app.saavn.valid(url):
+            if "shows" in url:
+                await mystic.delete()
+                mystic = await message.reply_text("<b>sᴏʀʀʏ! ᴄᴜʀʀᴇɴᴛʟʏ, ᴛʜᴇ ʙᴏᴛ ɪs ᴜɴᴀʙʟᴇ ᴛᴏ ᴘʟᴀʏ ᴛʜᴇ sᴀᴀᴠɴ ᴘᴏᴅᴄᴀsᴛ ᴜʀʟ.</b>")
+                return
+
+            elif await app.saavn.is_song(url):
+                try:
+                    file_path, details = await app.saavn.download(url)
+                except Exception as e:
+                    ex_type = type(e).__name__
+                    LOGGER(__name__).error("An error occurred", exc_info=True)
+                    await mystic.delete()
+                    mystic = await message.reply_text(_["play_3"])
+                    return
+                duration_sec = details["duration_sec"]
+                streamtype = "saavn_track"
+
+                if duration_sec > config.DURATION_LIMIT:
+                    await mystic.delete()
+                    mystic = await message.reply_text(
+                        _["play_6"].format(
+                            config.DURATION_LIMIT_MIN,
+                            details["duration_min"],
+                        )
+                    )
+                    return
+            elif await app.saavn.is_playlist(url):
+                try:
+                    details = await app.saavn.playlist(
+                        url, limit=config.PLAYLIST_FETCH_LIMIT
+                    )
+                    streamtype = "saavn_playlist"
+                except Exception as e:
+                    ex_type = type(e).__name__
+                    LOGGER(__name__).error("An error occurred", exc_info=True)
+                    await mystic.delete()
+                    mystic = await message.reply_text(_["play_3"])
+                    return
+
+                if len(details) == 0:
+                    await mystic.delete()
+                    mystic = await message.reply_text(_["play_3"])
+                    return
+            try:
+                await stream(
+                    _,
+                    mystic,
+                    user_id,
+                    details,
+                    chat_id,
+                    user_name,
+                    message.chat.id,
+                    streamtype=streamtype,
+                    forceplay=fplay,
+                )
+            except Exception as e:
+                ex_type = type(e).__name__
+                if ex_type == "AssistantErr":
+                    err = e
+                else:
+                    err = _["general_3"].format(ex_type)
+                    LOGGER(__name__).error("An error occurred", exc_info=True)
+                await mystic.delete()
+                mystic = await message.reply_text(err)
+                return
+            return await mystic.delete()
         else:
             try:
                 await Anony.stream_call(url)
@@ -492,7 +561,6 @@ async def play_commnd(
                     reply_markup=InlineKeyboardMarkup(buttons),
                 )
                 return await play_logs(message, streamtype=f"URL Searched Inline")
-
 
 @app.on_callback_query(filters.regex("MusicStream") & ~BANNED_USERS)
 @languageCB
