@@ -334,15 +334,15 @@ async def play_commnd(
                 return
             return await mystic.delete()
         # Saavn Streaming Integration
-        elif await app.saavn.valid(url):
+        elif await Platform.saavn.valid(url):
             if "shows" in url:
                 await mystic.delete()
                 mystic = await message.reply_text("<b>sᴏʀʀʏ! ᴄᴜʀʀᴇɴᴛʟʏ, ᴛʜᴇ ʙᴏᴛ ɪs ᴜɴᴀʙʟᴇ ᴛᴏ ᴘʟᴀʏ ᴛʜᴇ sᴀᴀᴠɴ ᴘᴏᴅᴄᴀsᴛ ᴜʀʟ.</b>")
                 return
 
-            elif await app.saavn.is_song(url):
+            elif await Platform.saavn.is_song(url):
                 try:
-                    file_path, details = await app.saavn.download(url)
+                    file_path, details = await Platform.saavn.download(url)
                 except Exception as e:
                     ex_type = type(e).__name__
                     LOGGER(__name__).error("An error occurred", exc_info=True)
@@ -361,9 +361,9 @@ async def play_commnd(
                         )
                     )
                     return
-            elif await app.saavn.is_playlist(url):
+            elif await Platform.saavn.is_playlist(url):
                 try:
-                    details = await app.saavn.playlist(
+                    details = await Platform.saavn.playlist(
                         url, limit=config.PLAYLIST_FETCH_LIMIT
                     )
                     streamtype = "saavn_playlist"
