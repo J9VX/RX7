@@ -75,6 +75,7 @@ async def play_commnd(
         if message.reply_to_message
         else None
     )
+    
     if audio_telegram:
         if audio_telegram.file_size > 104857600:
             await mystic.delete()
@@ -119,6 +120,7 @@ async def play_commnd(
                 return
             return await mystic.delete()
         return
+        
     elif video_telegram:
         if message.reply_to_message.document:
             try:
@@ -171,6 +173,7 @@ async def play_commnd(
                 return
             return await mystic.delete()
         return
+        
     elif url:
         if await YouTube.exists(url):
             if "playlist" in url:
@@ -205,6 +208,7 @@ async def play_commnd(
                     details["title"],
                     details["duration_min"],
                 )
+                
         elif await Spotify.valid(url):
             spotify = True
             if not config.SPOTIFY_CLIENT_ID and not config.SPOTIFY_CLIENT_SECRET:
@@ -260,6 +264,7 @@ async def play_commnd(
                 await mystic.delete()
                 mystic = await message.reply_text(_["play_15"])
                 return
+                
         elif await Apple.valid(url):
             if "album" in url:
                 try:
@@ -287,6 +292,7 @@ async def play_commnd(
                 await mystic.delete()
                 mystic = await message.reply_text(_["play_3"])
                 return
+                
         elif await Resso.valid(url):
             try:
                 details, track_id = await Resso.track(url)
@@ -297,6 +303,7 @@ async def play_commnd(
             streamtype = "youtube"
             img = details["thumb"]
             cap = _["play_10"].format(details["title"], details["duration_min"])
+            
         elif await SoundCloud.valid(url):
             try:
                 details, track_path = await SoundCloud.download(url)
@@ -333,74 +340,84 @@ async def play_commnd(
                 mystic = await message.reply_text(err)
                 return
             return await mystic.delete()
+            
         # Saavn Streaming Integration
         elif await Platform.saavn.valid(url):
             if "shows" in url:
-                await mystic.delete()
-                mystic = await message.reply_text("<b>sᴏʀʀʏ! ᴄᴜʀʀᴇɴᴛʟʏ, ᴛʜᴇ ʙᴏᴛ ɪs ᴜɴᴀʙʟᴇ ᴛᴏ ᴘʟᴀʏ ᴛʜᴇ sᴀᴀᴠɴ ᴘᴏᴅᴄᴀsᴛ ᴜʀʟ.</b>")
-                return
-
+                return await mystic.edit_text("<b>sᴏʀʀʏ! ᴄᴜʀʀᴇɴᴛʟʏ, ᴛʜᴇ ʙᴏᴛ ɪs ᴜɴᴀʙʟᴇ ᴛᴏ ᴘʟᴀʏ ᴛʜᴇ sᴀᴀᴠɴ ᴘᴏᴅᴄᴀsᴛ ᴜʀʟ.</b>")
             elif await Platform.saavn.is_song(url):
                 try:
                     file_path, details = await Platform.saavn.download(url)
                 except Exception as e:
                     ex_type = type(e).__name__
                     LOGGER(__name__).error("An error occurred", exc_info=True)
-                    await mystic.delete()
-                    mystic = await message.reply_text(_["play_3"])
-                    return
+                    return await mystic.edit_text(_["play_3"])
                 duration_sec = details["duration_sec"]
                 streamtype = "saavn_track"
-
+                
                 if duration_sec > config.DURATION_LIMIT:
-                    await mystic.delete()
-                    mystic = await message.reply_text(
-                        _["play_6"].format(
-                            config.DURATION_LIMIT_MIN,
-                            details["duration_min"],
+                    return await mystic.edit_text(_["play_6"].format(config.DURATION_LIMIT_MIN,details["duration_min"],))
+                elif await Platform.saavn.is_playlist(url):
+                    try:
+                        details = await Platform.saavn.playlist(url, limit=config.PLAYLIST_FETCH_LIMIT)
+                        streamtype = "saavn_playlist"
+                    except Exception as e:
+                        ex_type = type(e).__name__
+                        LOGGER(__name__).error("An error occurred", exc_info=True)
+                        return await mystic.edit_text(_["play_3"])
+                        
+                    if len(details) == 0:
+                        return await mystic.edit_text(_["play_3"])
+                    try:
+                        await stream(
+                            _,
+                            mystic,
+                            user_id,
+                            details,
+                            chat_id,
+                            user_name,
+                            message.chat.id,
+                            streamtype=streamtype,
+                            forceplay=fplay,
                         )
-                    )
-                    return
-            elif await Platform.saavn.is_playlist(url):
-                try:
-                    details = await Platform.saavn.playlist(
-                        url, limit=config.PLAYLIST_FETCH_LIMIT
-                    )
-                    streamtype = "saavn_playlist"
-                except Exception as e:
-                    ex_type = type(e).__name__
-                    LOGGER(__name__).error("An error occurred", exc_info=True)
-                    await mystic.delete()
-                    mystic = await message.reply_text(_["play_3"])
-                    return
-
-                if len(details) == 0:
-                    await mystic.delete()
-                    mystic = await message.reply_text(_["play_3"])
-                    return
-            try:
-                await stream(
-                    _,
-                    mystic,
-                    user_id,
-                    details,
-                    chat_id,
-                    user_name,
-                    message.chat.id,
-                    streamtype=streamtype,
-                    forceplay=fplay,
-                )
-            except Exception as e:
-                ex_type = type(e).__name__
-                if ex_type == "AssistantErr":
-                    err = e
-                else:
-                    err = _["general_3"].format(ex_type)
-                    LOGGER(__name__).error("An error occurred", exc_info=True)
-                await mystic.delete()
-                mystic = await message.reply_text(err)
-                return
-            return await mystic.delete()
+                    except Exception as e:
+                        ex_type = type(e).__name__
+                        if ex_type == "AssistantErr":
+                            err = e
+                        else:
+                            err = _["general_3"].format(ex_type)
+                            LOGGER(__name__).error("An error occurred", exc_info=True)
+                            return await mystic.edit_text(err)
+                        return await mystic.delete()
+                        mystic = await message.reply_text(_["play_3"])
+                        return
+                    if len(details) == 0:
+                        await mystic.delete()
+                        mystic = await message.reply_text(_["play_3"])
+                        return
+                    try:
+                        await stream(
+                            _,
+                            mystic,
+                            user_id,
+                            details,
+                            chat_id,
+                            user_name,
+                            message.chat.id,
+                            streamtype=streamtype,
+                            forceplay=fplay,
+                        )
+                    except Exception as e:
+                        ex_type = type(e).__name__
+                        if ex_type == "AssistantErr":
+                            err = e
+                        else:
+                            err = _["general_3"].format(ex_type)
+                            LOGGER(__name__).error("An error occurred", exc_info=True)
+                            await mystic.delete()
+                            mystic = await message.reply_text(err)
+                            return
+                    return await mystic.delete()
         else:
             try:
                 await Anony.stream_call(url)
@@ -457,6 +474,7 @@ async def play_commnd(
             mystic = await message.reply_text(_["play_3"])
             return
         streamtype = "youtube"
+        
     if str(playmode) == "Direct":
         if not plist_type:
             if details["duration_min"]:
