@@ -38,7 +38,6 @@ from Opus.utils.inline.play import stream_markup
 from Opus.utils.stream.autoclear import auto_clean
 from Opus.utils.thumbnails import get_thumb
 from strings import get_string
-from Opus import Platform
 
 autoend = {}
 counter = {}
@@ -485,41 +484,6 @@ class Call(PyTgCalls):
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
-            elif "saavn_" in queued:
-                url = check[0].get("url")
-                details = await Platform.saavn.info(url)
-                if video:
-                    stream = MediaStream(
-                        details["song"],
-                        AudioQuality.STUDIO,
-                        VideoQuality.SD_480p,
-                    )
-                else:
-                    stream = MediaStream(
-                        details["song"],
-                        AudioQuality.STUDIO,
-                    )
-                try:
-                    await client.change_stream(chat_id, stream)
-                except:
-                    return await app.send_message(
-                        original_chat_id,
-                        text=_["call_6"],
-                    )
-                button = stream_markup(_, chat_id)
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=details["thumb"],
-                    caption=_["stream_1"].format(
-                        url,
-                        title[:23],
-                        check[0]["dur"],
-                        user,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(button),
-                )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "tg"
             else:
                 if video:
                     stream = MediaStream(
@@ -538,7 +502,7 @@ class Call(PyTgCalls):
                     return await app.send_message(
                         original_chat_id,
                         text=_["call_6"],
-                    ) 
+                    )
                 if videoid == "telegram":
                     button = stream_markup(_, chat_id)
                     run = await app.send_photo(
@@ -640,3 +604,4 @@ class Call(PyTgCalls):
 
 
 Anony = Call()
+        
