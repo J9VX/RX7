@@ -1,4 +1,4 @@
-import os
+"""import os
 
 import aiohttp
 import yt_dlp
@@ -131,5 +131,5 @@ class Saavn:
         new_img.paste(resized_img, ((size[0] - new_width) // 2, 0))
 
         new_img.save(thumb_path, format="JPEG")
-        return thumb_path
+        return thumb_path"""
         
