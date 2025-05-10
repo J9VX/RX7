@@ -10,4 +10,3 @@ from .Youtube import YouTubeAPI
 class PlaTForms:
     def __init__(self):
         self.saavn = Saavn()
-        self.resso = Resso()
