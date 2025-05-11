@@ -17,7 +17,10 @@ pending_downloads = {}
 @app.on_message(
     filters.command(["jsong"]) & filters.group & ~BANNED_USERS
 )
-async def jsong_command(client, message: Message, _):
+async def jsong_command(client, message: Message):
+    # Get translation function if needed (replace with your actual translation system)
+    _ = lambda x: x
+    
     if len(message.command) < 2:
         return await message.reply_text("Please provide a JioSaavn song URL or search query after the command.")
     
