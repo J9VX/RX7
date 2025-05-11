@@ -12,7 +12,7 @@ import asyncio
 import aiohttp
 
 SPOTIFY_CLIENT_ID = "2d3fd5ccdd3d43dda6f17864d8eb7281"
-SPOTIFY_CLIENT_SECRET = "48d311d8910a4531ae81205e1f754d27
+SPOTIFY_CLIENT_SECRET = "48d311d8910a4531ae81205e1f754d27"
 
 # Initialize Spotify client
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
