@@ -15,9 +15,10 @@ from Opus.utils.logger import play_logs
 from Opus.utils.stream.stream import stream
 
 @app.on_message(
-    command(
-        "JPLAY_COMMAND",
-        prefixes=["/"],
+    filters.command(
+        [
+            "jplay"
+        ]
     )
     & filters.group
     & ~BANNED_USERS
