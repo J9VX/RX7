@@ -1,14 +1,18 @@
 import os
 import aiohttp
+import logging
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pyrogram.errors import BadRequest
 import config
 from config import BANNED_USERS
-from Opus import app, LOGGER
+from Opus import app
 from Opus.utils import seconds_to_min
 from Opus.utils.logger import play_logs
 from Opus import Platform
+
+# Set up proper logging
+logger = logging.getLogger(__name__)
 
 # Dictionary to store pending downloads
 pending_downloads = {}
@@ -26,10 +30,10 @@ async def search_saavn_songs(query: str, limit: int = 5):
                         results = data.get('data', {}).get('results', [])
                         if isinstance(results, list):
                             return results
-                    LOGGER.error(f"Unexpected API response format: {data}")
+                    logger.error(f"Unexpected API response format: {data}")
                 return []
     except Exception as e:
-        LOGGER.error(f"Search API error: {e}")
+        logger.error(f"Search API error: {e}", exc_info=True)
         return []
 
 async def download_saavn_song(song_id: str):
@@ -41,8 +45,11 @@ async def download_saavn_song(song_id: str):
             if file_path and os.path.exists(file_path):
                 return file_path, details
         return None, None
+    except KeyError as e:
+        logger.error(f"KeyError in API response: {e}", exc_info=True)
+        return None, None
     except Exception as e:
-        LOGGER.error(f"Download error: {e}")
+        logger.error(f"Download error: {e}", exc_info=True)
         return None, None
 
 @app.on_message(
@@ -96,7 +103,7 @@ async def jsong_command(client, message: Message):
             await play_logs(message, streamtype="JioSaavn Download")
             
         except Exception as e:
-            LOGGER.error(f"URL download error: {e}")
+            logger.error(f"URL download error: {e}", exc_info=True)
             await message.reply_text("❌ An error occurred while processing your request")
     
     # Handle song name searches
@@ -121,7 +128,7 @@ async def jsong_command(client, message: Message):
                         )
                     ])
                 except Exception as e:
-                    LOGGER.error(f"Error processing song {idx}: {e}")
+                    logger.error(f"Error processing song {idx}: {e}", exc_info=True)
                     continue
             
             if not buttons:
@@ -133,7 +140,7 @@ async def jsong_command(client, message: Message):
             )
             
         except Exception as e:
-            LOGGER.error(f"Search error: {e}")
+            logger.error(f"Search error: {e}", exc_info=True)
             await message.reply_text("❌ Failed to search for songs. Please try again.")
 
 @app.on_callback_query(filters.regex(r"^dl_(\d+)_(.+)$"))
@@ -176,7 +183,7 @@ async def handle_song_download(client, callback_query):
         await play_logs(callback_query.message, streamtype="JioSaavn Download")
         
     except Exception as e:
-        LOGGER.error(f"Download callback error: {e}")
+        logger.error(f"Download callback error: {e}", exc_info=True)
         await msg.edit("❌ Failed to download song")
         
         # Cleanup if error occurred
