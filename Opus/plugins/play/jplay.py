@@ -1,193 +1,126 @@
 import os
-import aiohttp
-import logging
+import yt_dlp
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.errors import BadRequest
 import config
 from config import BANNED_USERS
 from Opus import app
 from Opus.utils import seconds_to_min
-from Opus.utils.logger import play_logs
-from Opus import Platform
+import asyncio
+import aiohttp
 
-# Set up proper logging
-logger = logging.getLogger(__name__)
+SPOTIFY_CLIENT_ID = "2d3fd5ccdd3d43dda6f17864d8eb7281"
+SPOTIFY_CLIENT_SECRET = "48d311d8910a4531ae81205e1f754d27
 
-# Dictionary to store pending downloads
-pending_downloads = {}
+# Initialize Spotify client
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID,
+    client_secret=SPOTIFY_CLIENT_SECRET
+))
 
-async def search_saavn_songs(query: str, limit: int = 5):
-    """Search songs using Saavn API with better error handling"""
-    url = f"https://saavn.dev/api/search/songs?query={query}&limit={limit}"
+# YouTube download options
+ydl_opts = {
+    'format': 'bestaudio/best',
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '320',
+    }],
+    'outtmpl': 'downloads/%(title)s.%(ext)s',
+    'quiet': True
+}
+
+async def search_spotify(query, limit=5):
+    """Search songs on Spotify"""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # More robust data extraction
-                    if isinstance(data, dict):
-                        results = data.get('data', {}).get('results', [])
-                        if isinstance(results, list):
-                            return results
-                    logger.error(f"Unexpected API response format: {data}")
-                return []
+        results = sp.search(q=query, limit=limit, type='track')
+        return results['tracks']['items']
     except Exception as e:
-        logger.error(f"Search API error: {e}", exc_info=True)
+        print(f"Spotify search error: {e}")
         return []
 
-async def download_saavn_song(song_id: str):
-    """Download song with better error handling"""
+async def download_youtube_audio(query):
+    """Download audio from YouTube"""
     try:
-        song_url = f"https://www.jiosaavn.com/song/{song_id}"
-        if await Platform.saavn.valid(song_url) and await Platform.saavn.is_song(song_url):
-            file_path, details = await Platform.saavn.download(song_url)
-            if file_path and os.path.exists(file_path):
-                return file_path, details
-        return None, None
-    except KeyError as e:
-        logger.error(f"KeyError in API response: {e}", exc_info=True)
-        return None, None
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch:{query}", download=True)
+            if 'entries' in info and info['entries']:
+                entry = info['entries'][0]
+                return {
+                    'filepath': ydl.prepare_filename(entry),
+                    'title': entry.get('title', 'Unknown Track'),
+                    'duration': entry.get('duration', 0),
+                    'artist': entry.get('uploader', 'Unknown Artist'),
+                    'thumbnail': entry.get('thumbnail', '')
+                }
     except Exception as e:
-        logger.error(f"Download error: {e}", exc_info=True)
-        return None, None
+        print(f"YouTube download error: {e}")
+    return None
 
-@app.on_message(
-    filters.command(["jsong"]) & 
-    filters.group & 
-    ~BANNED_USERS
-)
-async def jsong_command(client, message: Message):
+@app.on_message(filters.command(["song"]) & filters.group & ~BANNED_USERS)
+async def song_search(client, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text("Please provide a song name or JioSaavn URL")
+        return await message.reply_text("Please provide a song name to search")
     
-    query = message.text.split(None, 1)[1].strip()
-    if not query:
-        return await message.reply_text("Please provide a valid search query")
-    
-    user_id = message.from_user.id
-    
-    # Handle direct URLs
-    if query.startswith(('http://', 'https://')) and 'jiosaavn.com' in query:
-        try:
-            msg = await message.reply_text("⬇️ Processing your song...")
-            
-            if not (await Platform.saavn.valid(query) and await Platform.saavn.is_song(query)):
-                return await msg.edit("⚠️ Invalid or unsupported JioSaavn URL")
-            
-            file_path, details = await Platform.saavn.download(query)
-            if not file_path or not details:
-                return await msg.edit("❌ Failed to download song")
-            
-            # Check duration
-            if details.get("duration_sec", 0) > config.DURATION_LIMIT:
-                os.remove(file_path)
-                return await msg.edit(f"⏳ Song too long (max {seconds_to_min(config.DURATION_LIMIT)})")
-            
-            # Send audio
-            await message.reply_audio(
-                audio=file_path,
-                title=details.get("title", "Unknown Track"),
-                duration=details.get("duration_sec", 0),
-                performer=details.get("artist", "Unknown Artist"),
-                thumb=details.get("thumb"),
-                caption=f"🎵 {details.get('title', 'Unknown Track')}\n🎤 {details.get('artist', 'Unknown Artist')}"
-            )
-            
-            # Cleanup
-            os.remove(file_path)
-            if details.get("thumb") and os.path.exists(details["thumb"]):
-                os.remove(details["thumb"])
-            
-            await msg.delete()
-            await play_logs(message, streamtype="JioSaavn Download")
-            
-        except Exception as e:
-            logger.error(f"URL download error: {e}", exc_info=True)
-            await message.reply_text("❌ An error occurred while processing your request")
-    
-    # Handle song name searches
-    else:
-        try:
-            msg = await message.reply_text("🔍 Searching for songs...")
-            songs = await search_saavn_songs(query)
-            
-            if not songs:
-                return await msg.edit("❌ No songs found. Try a different search term.")
-            
-            buttons = []
-            for idx, song in enumerate(songs[:5], 1):
-                try:
-                    name = song.get('name', 'Unknown Track')
-                    artist = song.get('primaryArtists', 'Unknown Artist')
-                    duration = seconds_to_min(song.get('duration', 0))
-                    buttons.append([
-                        InlineKeyboardButton(
-                            f"{idx}. {name[:20]} - {artist[:15]} ({duration})",
-                            callback_data=f"dl_{user_id}_{song['id']}"
-                        )
-                    ])
-                except Exception as e:
-                    logger.error(f"Error processing song {idx}: {e}", exc_info=True)
-                    continue
-            
-            if not buttons:
-                return await msg.edit("❌ No valid songs found in results")
-            
-            await msg.edit_text(
-                f"🎶 Search Results for: {query[:50]}",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-            
-        except Exception as e:
-            logger.error(f"Search error: {e}", exc_info=True)
-            await message.reply_text("❌ Failed to search for songs. Please try again.")
-
-@app.on_callback_query(filters.regex(r"^dl_(\d+)_(.+)$"))
-async def handle_song_download(client, callback_query):
-    user_id = int(callback_query.matches[0].group(1))
-    song_id = callback_query.matches[0].group(2)
-    
-    if callback_query.from_user.id != user_id:
-        return await callback_query.answer("This action isn't for you!", show_alert=True)
-    
-    await callback_query.answer("Starting download...")
-    msg = await callback_query.message.edit_text("⬇️ Downloading your song...")
+    query = " ".join(message.command[1:])
+    msg = await message.reply_text(f"🔍 Searching for: {query}")
     
     try:
-        file_path, details = await download_saavn_song(song_id)
-        if not file_path or not details:
-            return await msg.edit("❌ Failed to download song")
+        results = await search_spotify(query)
+        if not results:
+            return await msg.edit_text("No results found")
         
-        # Check duration
-        if details.get("duration_sec", 0) > config.DURATION_LIMIT:
-            os.remove(file_path)
-            return await msg.edit(f"⏳ Song too long (max {seconds_to_min(config.DURATION_LIMIT)})")
+        buttons = []
+        for idx, track in enumerate(results, 1):
+            artists = ", ".join([a['name'] for a in track['artists']])
+            duration = seconds_to_min(track['duration_ms']//1000)
+            buttons.append([
+                InlineKeyboardButton(
+                    f"{idx}. {track['name'][:20]} - {artists[:15]} ({duration})",
+                    callback_data=f"dl_{track['id']}"
+                )
+            ])
         
-        # Send audio
+        await msg.edit_text(
+            f"🎵 Search Results for: {query}",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    except Exception as e:
+        await msg.edit_text("Failed to search for songs")
+        print(f"Search error: {e}")
+
+@app.on_callback_query(filters.regex(r"^dl_(.+)$"))
+async def download_handler(client, callback_query):
+    track_id = callback_query.matches[0].group(1)
+    await callback_query.answer("Preparing download...")
+    
+    try:
+        track = sp.track(track_id)
+        query = f"{track['name']} {track['artists'][0]['name']}"
+        
+        msg = await callback_query.message.reply_text(f"⬇️ Downloading: {query}")
+        
+        # Download from YouTube
+        audio_info = await download_youtube_audio(query)
+        if not audio_info:
+            return await msg.edit_text("Failed to download song")
+        
+        # Send audio file
         await callback_query.message.reply_audio(
-            audio=file_path,
-            title=details.get("title", "Unknown Track"),
-            duration=details.get("duration_sec", 0),
-            performer=details.get("artist", "Unknown Artist"),
-            thumb=details.get("thumb"),
-            caption=f"🎵 {details.get('title', 'Unknown Track')}\n🎤 {details.get('artist', 'Unknown Artist')}"
+            audio=audio_info['filepath'],
+            title=audio_info['title'],
+            duration=audio_info['duration'],
+            performer=track['artists'][0]['name'],
+            thumb=track['album']['images'][0]['url'] if track['album']['images'] else None,
+            caption=f"🎵 {track['name']}\n🎤 {', '.join(a['name'] for a in track['artists'])}"
         )
         
         # Cleanup
-        os.remove(file_path)
-        if details.get("thumb") and os.path.exists(details["thumb"]):
-            os.remove(details["thumb"])
-        
+        os.remove(audio_info['filepath'])
         await msg.delete()
-        await play_logs(callback_query.message, streamtype="JioSaavn Download")
         
     except Exception as e:
-        logger.error(f"Download callback error: {e}", exc_info=True)
-        await msg.edit("❌ Failed to download song")
-        
-        # Cleanup if error occurred
-        if 'file_path' in locals() and file_path and os.path.exists(file_path):
-            os.remove(file_path)
-        if 'details' in locals() and details and details.get("thumb") and os.path.exists(details["thumb"]):
-            os.remove(details["thumb"])
+        await callback_query.message.reply_text("Failed to process download")
+        print(f"Download error: {e}")
