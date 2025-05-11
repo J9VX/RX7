@@ -1,0 +1,2 @@
+JPLAY_COMMAND : ["jplay"]
+PING_COMMAND : ["ping", "alive", "aalive"]
