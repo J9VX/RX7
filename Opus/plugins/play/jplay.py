@@ -18,9 +18,6 @@ pending_downloads = {}
     filters.command(["jsong"]) & filters.group & ~BANNED_USERS
 )
 async def jsong_command(client, message: Message):
-    # Get translation function if needed (replace with your actual translation system)
-    _ = lambda x: x
-    
     if len(message.command) < 2:
         return await message.reply_text("Please provide a JioSaavn song URL or search query after the command.")
     
@@ -31,10 +28,8 @@ async def jsong_command(client, message: Message):
     if await Platform.saavn.valid(query):
         if await Platform.saavn.is_song(query):
             try:
-                # Get song details without downloading
-                details = await Platform.saavn.get_info(query)
-                if not details:
-                    return await message.reply_text("Could not fetch song details.")
+                # Download the song to get details (since get_info isn't available)
+                file_path, details = await Platform.saavn.download(query)
                 
                 # Create confirmation buttons
                 buttons = InlineKeyboardMarkup([
@@ -46,7 +41,7 @@ async def jsong_command(client, message: Message):
                 
                 # Store the details temporarily
                 pending_downloads[user_id] = {
-                    "url": query,
+                    "file_path": file_path,
                     "details": details,
                     "message_id": message.id
                 }
@@ -63,30 +58,8 @@ async def jsong_command(client, message: Message):
         else:
             return await message.reply_text("Only single song URLs are supported.")
     else:
-        # Handle search query
-        try:
-            search_results = await Platform.saavn.search(query, limit=5)
-            if not search_results:
-                return await message.reply_text("No results found for your search.")
-            
-            # Create buttons for search results
-            buttons = []
-            for i, result in enumerate(search_results[:5], start=1):
-                buttons.append(
-                    [InlineKeyboardButton(
-                        f"{i}. {result['title']} - {result.get('artist', 'Unknown')} ({result['duration_min']})",
-                        callback_data=f"song_select_{user_id}_{result['url']}"
-                    )]
-                )
-            
-            await message.reply_text(
-                "🔍 Search Results:\nSelect a song to download:",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-            
-        except Exception as e:
-            LOGGER(__name__).error(f"Search error: {e}")
-            return await message.reply_text("Failed to search for songs.")
+        # Search functionality not available since Platform.saavn.search doesn't exist
+        return await message.reply_text("Please provide a direct JioSaavn song URL. Search functionality is not available.")
 
 @app.on_callback_query(filters.regex(r"^download_(\d+)_(yes|no)$"))
 async def download_confirmation(client, callback_query):
@@ -100,13 +73,20 @@ async def download_confirmation(client, callback_query):
     
     if action == "no":
         try:
+            # Clean up the downloaded file if user cancels
+            if user_id in pending_downloads:
+                if os.path.exists(pending_downloads[user_id]["file_path"]):
+                    os.remove(pending_downloads[user_id]["file_path"])
+                if "thumb" in pending_downloads[user_id]["details"] and os.path.exists(pending_downloads[user_id]["details"]["thumb"]):
+                    os.remove(pending_downloads[user_id]["details"]["thumb"])
+                del pending_downloads[user_id]
             await callback_query.message.delete()
-        except:
-            pass
+        except Exception as e:
+            LOGGER(__name__).error(f"Error cleaning up: {e}")
         return await callback_query.answer("Download cancelled.")
     
     await callback_query.answer("Starting download...")
-    msg = await callback_query.message.edit_text("⬇️ Downloading song...")
+    msg = await callback_query.message.edit_text("⬇️ Preparing song...")
     
     # Get the stored details
     download_info = pending_downloads.get(user_id)
@@ -114,12 +94,15 @@ async def download_confirmation(client, callback_query):
         return await msg.edit("Session expired. Please try again.")
     
     try:
-        # Download the song
-        file_path, full_details = await Platform.saavn.download(download_info["url"])
+        details = download_info["details"]
+        file_path = download_info["file_path"]
         
         # Check duration limit
-        if full_details["duration_sec"] > config.DURATION_LIMIT:
+        if details["duration_sec"] > config.DURATION_LIMIT:
             os.remove(file_path)
+            if os.path.exists(details.get("thumb", "")):
+                os.remove(details["thumb"])
+            del pending_downloads[user_id]
             return await msg.edit(
                 f"Song is too long. Max allowed: {seconds_to_min(config.DURATION_LIMIT)}"
             )
@@ -127,72 +110,32 @@ async def download_confirmation(client, callback_query):
         # Send the audio file
         await callback_query.message.reply_audio(
             audio=file_path,
-            title=full_details["title"],
-            duration=full_details["duration_sec"],
-            performer=full_details.get("artist", "Unknown Artist"),
-            thumb=full_details["thumb"],
-            caption=f"🎧 **{full_details['title']}**\n🎤 {full_details.get('artist', 'Unknown')}\n⏳ {full_details['duration_min']}"
+            title=details["title"],
+            duration=details["duration_sec"],
+            performer=details.get("artist", "Unknown Artist"),
+            thumb=details.get("thumb"),
+            caption=f"🎧 **{details['title']}**\n🎤 {details.get('artist', 'Unknown')}\n⏳ {details['duration_min']}"
         )
         
         # Clean up
-        os.remove(file_path)
-        if os.path.exists(full_details["thumb"]):
-            os.remove(full_details["thumb"])
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        if "thumb" in details and os.path.exists(details["thumb"]):
+            os.remove(details["thumb"])
         
         await msg.delete()
         await play_logs(callback_query.message, streamtype="JioSaavn Download")
         
     except Exception as e:
         LOGGER(__name__).error(f"Download error: {e}")
-        await msg.edit("Failed to download the song. Please try again later.")
+        await msg.edit("Failed to send the song. Please try again later.")
         
         # Clean up if any partial files exist
         if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
-        if 'full_details' in locals() and os.path.exists(full_details.get("thumb", "")):
-            os.remove(full_details["thumb"])
+        if 'details' in locals() and "thumb" in details and os.path.exists(details["thumb"]):
+            os.remove(details["thumb"])
     
     # Remove the pending download
     if user_id in pending_downloads:
         del pending_downloads[user_id]
-
-@app.on_callback_query(filters.regex(r"^song_select_(\d+)_(.+)$"))
-async def song_selection(client, callback_query):
-    user_id = int(callback_query.matches[0].group(1))
-    song_url = callback_query.matches[0].group(2)
-    original_user = callback_query.from_user.id
-    
-    if original_user != user_id:
-        return await callback_query.answer("This selection isn't for you!", show_alert=True)
-    
-    await callback_query.answer("Getting song info...")
-    
-    try:
-        details = await Platform.saavn.get_info(song_url)
-        if not details:
-            return await callback_query.message.edit_text("Could not fetch song details.")
-        
-        # Create confirmation buttons
-        buttons = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Yes", callback_data=f"download_{user_id}_yes"),
-                InlineKeyboardButton("❌ No", callback_data=f"download_{user_id}_no")
-            ]
-        ])
-        
-        # Store the details temporarily
-        pending_downloads[user_id] = {
-            "url": song_url,
-            "details": details,
-            "message_id": callback_query.message.id
-        }
-        
-        # Edit the message with confirmation
-        await callback_query.message.edit_text(
-            f"Do you want to download:\n\n🎵 **{details['title']}**\n🎤 {details.get('artist', 'Unknown Artist')}\n⏳ {details['duration_min']}",
-            reply_markup=buttons
-        )
-        
-    except Exception as e:
-        LOGGER(__name__).error(f"Song selection error: {e}")
-        await callback_query.message.edit_text("Failed to process your selection. Please try again.")
