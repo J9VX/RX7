@@ -14,12 +14,10 @@ from youtubesearchpython.__future__ import VideosSearch
 from Opus.utils.database import is_on_off
 from Opus.utils.formatters import time_to_seconds
 
-# Configuration
 APIS = [
     {"url": "http://46.250.243.87:1470/youtube", "key": "1a873582a7c83342f961cc0a177b2b26"},
     {"url": "http://yt.sanatanixtech.site", "key": "SANATANIxTECH"}
 ]
-JIOSAAVN_API = "https://jiosaavan-mu.vercel.app"
 
 def cookie_txt_file():
     folder_path = f"{os.getcwd()}/cookies"
@@ -33,35 +31,23 @@ def cookie_txt_file():
     return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
 
 async def get_stream_url(query, video=False):
-    # First try JioSaavn if it's a music query
-    if "saavn.com" in query.lower():
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                params = {"query": query}
-                response = await client.get(f"{JIOSAAVN_API}/song", params=params)
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get("media_url", "")
-        except Exception as e:
-            logging.warning(f"JioSaavn API Error: {e}")
-
-    # Fallback to YouTube APIs
-    api = random.choice(APIS)
+    api = random.choice(APIS)  # Randomly select an API
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             params = {"query": query, "video": video, "api_key": api["key"]}
             response = await client.get(api["url"], params=params)
-            if response.status_code == 200:
-                info = response.json()
-                return info.get("stream_url", "")
+            if response.status_code != 200:
+                return ""
+            info = response.json()
+            return info.get("stream_url", "")
     except Exception as e:
         logging.error(f"API Error with {api['url']}: {e}")
-    return ""
-
+        return ""
+        
 class YouTubeAPI:
     def __init__(self):
         self.base = "https://www.youtube.com/watch?v="
-        self.regex = r"(?:youtube\.com|youtu\.be|saavn\.com)"
+        self.regex = r"(?:youtube\.com|youtu\.be)"
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
         self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -94,108 +80,45 @@ class YouTubeAPI:
         return text[offset:offset + length] if offset else None
 
     async def details(self, link: str, videoid: Union[bool, str] = None):
-        if "saavn.com" in link.lower():
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    params = {"query": link}
-                    response = await client.get(f"{JIOSAAVN_API}/song", params=params)
-                    if response.status_code == 200:
-                        data = response.json()
-                        return (
-                            data.get("title", "Unknown"),
-                            data.get("duration", "0:00"),
-                            int(time_to_seconds(data.get("duration", "0:00"))),
-                            data.get("thumbnail", ""),
-                            data.get("id", "")
-                        )
-            except Exception as e:
-                logging.warning(f"JioSaavn API Error: {e}")
-
         if videoid:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-            
-        # Parallel execution for faster response
-        try:
-            results = VideosSearch(link, limit=1)
-            result = (await results.next())["result"][0]
-            return (
-                result["title"],
-                result["duration"],
-                int(time_to_seconds(result["duration"])),
-                result["thumbnails"][0]["url"].split("?")[0],
-                result["id"],
-            )
-        except Exception as e:
-            logging.error(f"Error getting details: {e}")
-            return "Unknown", "0:00", 0, "", ""
+        results = VideosSearch(link, limit=1)
+        for result in (await results.next())["result"]:
+            title = result["title"]
+            duration_min = result["duration"]
+            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
+            vidid = result["id"]
+            duration_sec = 0 if str(duration_min) == "None" else int(time_to_seconds(duration_min))
+        return title, duration_min, duration_sec, thumbnail, vidid
 
     async def title(self, link: str, videoid: Union[bool, str] = None):
-        if "saavn.com" in link.lower():
-            try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    params = {"query": link}
-                    response = await client.get(f"{JIOSAAVN_API}/song", params=params)
-                    if response.status_code == 200:
-                        return response.json().get("title", "Unknown")
-            except Exception:
-                pass
-
         if videoid:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-            
-        try:
-            results = VideosSearch(link, limit=1)
-            return (await results.next())["result"][0]["title"]
-        except Exception:
-            return "Unknown"
+        results = VideosSearch(link, limit=1)
+        for result in (await results.next())["result"]:
+            return result["title"]
 
     async def duration(self, link: str, videoid: Union[bool, str] = None):
-        if "saavn.com" in link.lower():
-            try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    params = {"query": link}
-                    response = await client.get(f"{JIOSAAVN_API}/song", params=params)
-                    if response.status_code == 200:
-                        return response.json().get("duration", "0:00")
-            except Exception:
-                pass
-
         if videoid:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-            
-        try:
-            results = VideosSearch(link, limit=1)
-            return (await results.next())["result"][0]["duration"]
-        except Exception:
-            return "0:00"
+        results = VideosSearch(link, limit=1)
+        for result in (await results.next())["result"]:
+            return result["duration"]
 
     async def thumbnail(self, link: str, videoid: Union[bool, str] = None):
-        if "saavn.com" in link.lower():
-            try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    params = {"query": link}
-                    response = await client.get(f"{JIOSAAVN_API}/song", params=params)
-                    if response.status_code == 200:
-                        return response.json().get("thumbnail", "")
-            except Exception:
-                pass
-
         if videoid:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-            
-        try:
-            results = VideosSearch(link, limit=1)
-            return (await results.next())["result"][0]["thumbnails"][0]["url"].split("?")[0]
-        except Exception:
-            return ""
+        results = VideosSearch(link, limit=1)
+        for result in (await results.next())["result"]:
+            return result["thumbnails"][0]["url"].split("?")[0]
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -203,32 +126,7 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
             
-        # Try JioSaavn first if it's a Saavn link
-        if "saavn.com" in link.lower():
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    params = {"query": link}
-                    response = await client.get(f"{JIOSAAVN_API}/song", params=params)
-                    if response.status_code == 200:
-                        data = response.json()
-                        return 1, data.get("media_url", "")
-            except Exception as e:
-                logging.warning(f"JioSaavn API Error: {e}")
-
-        # Parallel execution for faster response
-        tasks = [
-            self._try_cookie_download(link),
-            self._try_api_download(link, True)
-        ]
-        
-        for task in asyncio.as_completed(tasks):
-            result = await task
-            if result:
-                return result
-        
-        return 0, "Failed to fetch video URL"
-
-    async def _try_cookie_download(self, link):
+        # First try with cookies (EXACT CODE FROM PROVIDED EXAMPLE)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "yt-dlp",
@@ -245,27 +143,14 @@ class YouTubeAPI:
                 return 1, stdout.decode().split("\n")[0]
         except Exception as e:
             logging.warning(f"Cookie-based video fetch failed: {e}")
-        return None
-
-    async def _try_api_download(self, link, video):
-        api_url = await get_stream_url(link, video)
+        
+        # Fallback to API
+        api_url = await get_stream_url(link, True)
         if api_url:
             return 1, api_url
-        return None
+        return 0, "Failed to fetch video URL"
 
     async def playlist(self, link, limit, user_id, videoid: Union[bool, str] = None):
-        if "saavn.com" in link.lower() and ("/album/" in link.lower() or "/featured/" in link.lower()):
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    params = {"query": link, "limit": limit}
-                    response = await client.get(f"{JIOSAAVN_API}/playlist", params=params)
-                    if response.status_code == 200:
-                        data = response.json()
-                        return [song["id"] for song in data.get("songs", [])]
-            except Exception as e:
-                logging.warning(f"JioSaavn Playlist Error: {e}")
-                return []
-
         if videoid:
             link = self.listbase + link
         if "&" in link:
@@ -275,37 +160,19 @@ class YouTubeAPI:
             playlist = await shell_cmd(
                 f"yt-dlp -i --get-id --flat-playlist --cookies {cookie_txt_file()} --playlist-end {limit} --skip-download {link}"
             )
-            return [key for key in playlist.split("\n") if key != ""]
+            result = playlist.split("\n")
+            return [key for key in result if key != ""]
         except Exception as e:
             logging.warning(f"[PLY] Failed to fetch playlist: {e}")
             return []
 
     async def track(self, link: str, videoid: Union[bool, str] = None):
-        if "saavn.com" in link.lower():
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    params = {"query": link}
-                    response = await client.get(f"{JIOSAAVN_API}/song", params=params)
-                    if response.status_code == 200:
-                        data = response.json()
-                        return {
-                            "title": data.get("title", "Unknown"),
-                            "link": link,
-                            "vidid": data.get("id", ""),
-                            "duration_min": data.get("duration", "0:00"),
-                            "thumb": data.get("thumbnail", ""),
-                        }, data.get("id", "")
-            except Exception as e:
-                logging.warning(f"JioSaavn API Error: {e}")
-
         if videoid:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-            
-        try:
-            results = VideosSearch(link, limit=1)
-            result = (await results.next())["result"][0]
+        results = VideosSearch(link, limit=1)
+        for result in (await results.next())["result"]:
             return {
                 "title": result["title"],
                 "link": result["link"],
@@ -313,15 +180,6 @@ class YouTubeAPI:
                 "duration_min": result["duration"],
                 "thumb": result["thumbnails"][0]["url"].split("?")[0],
             }, result["id"]
-        except Exception as e:
-            logging.error(f"Error getting track info: {e}")
-            return {
-                "title": "Unknown",
-                "link": link,
-                "vidid": "",
-                "duration_min": "0:00",
-                "thumb": "",
-            }, ""
 
     async def formats(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -344,6 +202,7 @@ class YouTubeAPI:
                         format_note = format.get("format_note", "").lower()
                         acodec = format.get("acodec", "").lower()
                         
+                        # Prioritize high-quality audio formats
                         is_high_quality_audio = (
                             "audio only" in format_note and 
                             acodec in ["opus", "flac", "alac"] or
@@ -380,6 +239,7 @@ class YouTubeAPI:
         except Exception as e:
             logging.warning(f"[FMT] Failed to fetch formats: {e}")
 
+        # Sort formats - prioritize high quality audio and standard video
         formats_available.sort(
             key=lambda x: (
                 -x.get("is_high_quality", False),
@@ -413,27 +273,6 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
             
-        # Try JioSaavn first if it's a Saavn link
-        if "saavn.com" in link.lower():
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    params = {"query": link}
-                    response = await client.get(f"{JIOSAAVN_API}/download", params=params)
-                    if response.status_code == 200:
-                        data = response.json()
-                        file_path = os.path.join("downloads", f"Saavn_{data.get('id', '')}.mp3")
-                        
-                        if not os.path.exists(file_path):
-                            async with httpx.AsyncClient() as download_client:
-                                async with download_client.stream("GET", data["download_url"]) as resp:
-                                    with open(file_path, "wb") as f:
-                                        async for chunk in resp.aiter_bytes():
-                                            f.write(chunk)
-                        
-                        return file_path, True
-            except Exception as e:
-                logging.warning(f"JioSaavn Download Error: {e}")
-
         loop = asyncio.get_running_loop()
         
         async def try_cookie_download():
@@ -463,6 +302,7 @@ class YouTubeAPI:
                 
                 elif songaudio:
                     def dl():
+                        # First try highest quality audio formats
                         try:
                             ydl_optssx = {
                                 "format": "bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio[abr>=320]/bestaudio/best",
@@ -483,12 +323,14 @@ class YouTubeAPI:
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
                             info = ydl.extract_info(link, download=False)
                             
+                            # Check for Opus (highest quality)
                             if any(f.get('acodec', '').lower() == 'opus' for f in info.get('formats', [])):
                                 path = os.path.join("downloads", f"{title}.opus")
                                 if not os.path.exists(path):
                                     ydl.download([link])
                                 return path, True
                             
+                            # Fallback to 320kbps MP3
                             ydl_optssx["postprocessors"][0]["preferredcodec"] = "mp3"
                             ydl_optssx["postprocessors"][0]["preferredquality"] = "320"
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
@@ -498,6 +340,7 @@ class YouTubeAPI:
                             return path, True
                         except Exception as e:
                             logging.warning(f"[AUDIO] Failed to get high quality audio: {e}")
+                            # Final fallback
                             ydl_optssx = {
                                 "format": "bestaudio/best",
                                 "outtmpl": f"downloads/{title}.%(ext)s",
@@ -580,6 +423,7 @@ class YouTubeAPI:
                 
                 else: 
                     def dl():
+                        # Audio-only download with highest quality priority
                         try:
                             ydl_optssx = {
                                 "format": "bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio[abr>=320]/bestaudio/best",
@@ -599,12 +443,14 @@ class YouTubeAPI:
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
                             info = ydl.extract_info(link, download=False)
                             
+                            # Check for Opus (highest quality)
                             if any(f.get('acodec', '').lower() == 'opus' for f in info.get('formats', [])):
                                 path = os.path.join("downloads", f"{info['id']}.opus")
                                 if not os.path.exists(path):
                                     ydl.download([link])
                                 return path, True
                             
+                            # Fallback to 320kbps MP3
                             ydl_optssx["postprocessors"][0]["preferredcodec"] = "mp3"
                             ydl_optssx["postprocessors"][0]["preferredquality"] = "320"
                             ydl = yt_dlp.YoutubeDL(ydl_optssx)
@@ -614,6 +460,7 @@ class YouTubeAPI:
                             return path, True
                         except Exception as e:
                             logging.warning(f"[AUDIO] Failed to get high quality audio: {e}")
+                            # Final fallback
                             ydl_optssx = {
                                 "format": "bestaudio/best",
                                 "outtmpl": "downloads/%(id)s.%(ext)s",
@@ -642,12 +489,10 @@ class YouTubeAPI:
                 logging.warning(f"[DL] Download failed: {e}")
                 return None
         
-        # Try cookie download first
         result = await try_cookie_download()
         if result is not None:
             return result
         
-        # Fallback to API
         if songvideo:
             return f"downloads/{title}.mp4", True
         elif songaudio:
@@ -655,3 +500,143 @@ class YouTubeAPI:
         else:
             stream_url = await get_stream_url(link, video)
             return stream_url, False if video else None
+
+this is my youtube.py can you add jiosaavan-mu.vercel.app url to fetch tracks only and can you make th youtube.py like faster fetch like faster switch cookies to api api too cookies anf else jiosaavan-mu.vercel.app
+
+
+here it the example to fetch songs from this jiosaavan-mu.vercel.app
+
+import os
+
+import aiohttp
+import yt_dlp
+
+from io import BytesIO
+from PIL import Image
+
+from config import seconds_to_time
+from Opus.utils.decorators import asyncify
+
+
+class Saavn:
+
+    @staticmethod
+    async def valid(url: str) -> bool:
+        return "jiosaavn.com" in url
+
+    @staticmethod
+    async def is_song(url: str) -> bool:
+        return "song" in url and not "/featured/" in url and "/album/" not in url
+
+    @staticmethod
+    async def is_playlist(url: str) -> bool:
+        return "/featured/" in url or "/album" in url
+
+    def clean_url(self, url: str) -> str:
+        if "#" in url:
+            url = url.split("#")[0]
+        return url
+
+    @asyncify
+    def playlist(self, url, limit):
+        clean_url = self.clean_url(url)
+        ydl_opts = {
+            "extract_flat": True,
+            "force_generic_extractor": True,
+            "quiet": True,
+        }
+        song_info = []
+        count = 0
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                playlist_info = ydl.extract_info(clean_url, download=False)
+                for entry in playlist_info["entries"]:
+                    if count == limit:
+                        break
+                    duration_sec = entry.get("duration", 0)
+                    info = {
+                        "title": entry["title"],
+                        "duration_sec": duration_sec,
+                        "duration_min": seconds_to_time(duration_sec),
+                        "thumb": entry.get("thumbnail", ""),
+                        "url": self.clean_url(entry["webpage_url"]),
+                    }
+                    song_info.append(info)
+                    count += 1
+            except Exception:
+                pass
+        return song_info
+
+    async def info(self, url):
+        url = self.clean_url(url)
+
+        async with aiohttp.ClientSession() as session:
+            if "jiosaavn.com" in url:
+                api_url = "https://saavn.dev/api/songs"
+                params = {"link": url, "limit": 1}
+            else:
+                api_url = "https://saavn.dev/api/search/songs"
+                params = {"query": url, "limit": 1}
+
+            async with session.get(api_url, params=params) as response:
+                data = await response.json()
+
+                if "jiosaavn.com" in url:
+                    info = data["data"][0]  # For Saavn URLs
+                else:
+                    info = data["data"]["results"][0]  # For search queries
+
+                thumb_url = info["image"][-1]["url"]
+                thumb_path = await self._resize_thumb(thumb_url, info["id"])
+
+                return {
+                    "title": info["name"],
+                    "duration_sec": info.get("duration", 0),
+                    "duration_min": seconds_to_time(info.get("duration", 0)),
+                    "thumb": thumb_path,
+                    "url": self.clean_url(info["url"]),
+                    "_download_url": info["downloadUrl"][-1]["url"],
+                    "_id": info["id"],
+                }
+
+    async def download(self, url):
+        details = await self.info(url)
+        file_path = os.path.join("downloads", f"Saavn_{details['_id']}.mp3")
+
+        if not os.path.exists(file_path):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(details["_download_url"]) as resp:
+                    if resp.status == 200:
+                        with open(file_path, "wb") as f:
+                            while chunk := await resp.content.read(1024):
+                                f.write(chunk)
+                        print(f"Downloaded: {file_path}")
+                    else:
+                        raise ValueError(
+                            f"Failed to download {details['_download_url']}. HTTP Status: {resp.status}"
+                        )
+
+        details["filepath"] = file_path
+        return file_path, details
+
+    async def _resize_thumb(self, thumb_url, _id, size=(1280, 720)):
+        thumb_path = os.path.join("cache", f"Thumb_{_id}.jpg")
+
+        if os.path.exists(thumb_path):
+            return thumb_path
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(thumb_url) as response:
+                img_data = await response.read()
+
+        img = Image.open(BytesIO(img_data))
+        scale_factor = size[1] / img.height
+        new_width = int(img.width * scale_factor)
+        new_height = size[1]
+
+        resized_img = img.resize((new_width, new_height), Image.LANCZOS)
+        new_img = Image.new("RGB", size, (0, 0, 0))
+        new_img.paste(resized_img, ((size[0] - new_width) // 2, 0))
+
+        new_img.save(thumb_path, format="JPEG")
+        return thumb_path
