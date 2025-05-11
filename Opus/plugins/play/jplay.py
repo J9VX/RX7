@@ -20,7 +20,23 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_secret=SPOTIFY_CLIENT_SECRET
 ))
 
-# YouTube download options
+# Path to cookies file (downloaded from GitHub)
+COOKIES_PATH = "cookies.txt"
+
+# Ensure cookies file exists
+if not os.path.exists(COOKIES_PATH):
+    # Download cookies file from GitHub
+    async def download_cookies():
+        url = "https://raw.githubusercontent.com/J9VX/RX7/main/cookies/cookies.txt"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    with open(COOKIES_PATH, 'wb') as f:
+                        f.write(await response.read())
+    
+    asyncio.run(download_cookies())
+
+# YouTube download options with cookies
 ydl_opts = {
     'format': 'bestaudio/best',
     'postprocessors': [{
@@ -29,7 +45,19 @@ ydl_opts = {
         'preferredquality': '320',
     }],
     'outtmpl': 'downloads/%(title)s.%(ext)s',
-    'quiet': True
+    'quiet': True,
+    'cookiefile': COOKIES_PATH,
+    'extract_flat': True,
+    'retries': 10,
+    'fragment-retries': 10,
+    'extractor-retries': 10,
+    'ignoreerrors': True,
+    'no-check-certificate': True,
+    'geo-bypass': True,
+    'force-ipv4': True,
+    'noplaylist': True,
+    'socket-timeout': 10,
+    'source_address': '0.0.0.0'
 }
 
 async def search_spotify(query, limit=5):
@@ -42,7 +70,7 @@ async def search_spotify(query, limit=5):
         return []
 
 async def download_youtube_audio(query):
-    """Download audio from YouTube"""
+    """Download audio from YouTube with cookies"""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch:{query}", download=True)
@@ -102,7 +130,7 @@ async def download_handler(client, callback_query):
         
         msg = await callback_query.message.reply_text(f"⬇️ Downloading: {query}")
         
-        # Download from YouTube
+        # Download from YouTube with cookies
         audio_info = await download_youtube_audio(query)
         if not audio_info:
             return await msg.edit_text("Failed to download song")
@@ -110,7 +138,7 @@ async def download_handler(client, callback_query):
         # Send audio file
         await callback_query.message.reply_audio(
             audio=audio_info['filepath'],
-            title=audio_info['title'],
+            title=track['name'],
             duration=audio_info['duration'],
             performer=track['artists'][0]['name'],
             thumb=track['album']['images'][0]['url'] if track['album']['images'] else None,
@@ -118,7 +146,8 @@ async def download_handler(client, callback_query):
         )
         
         # Cleanup
-        os.remove(audio_info['filepath'])
+        if os.path.exists(audio_info['filepath']):
+            os.remove(audio_info['filepath'])
         await msg.delete()
         
     except Exception as e:
