@@ -16,10 +16,10 @@ userbot = Userbot()
 
 
 from .platforms import *
-"""from .platforms import PlaTForms
-Platform = PlaTForms()
-HELPABLE = {}"""
+from .platforms import PlaTForms
 
+Platform = PlaTForms()
+HELPABLE = {}
 Apple = AppleAPI()
 Carbon = CarbonAPI()
 SoundCloud = SoundAPI()
