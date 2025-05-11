@@ -8,7 +8,6 @@ import config
 from config import BANNED_USERS
 from Opus import app
 from Opus.utils import seconds_to_min
-import asyncio
 import aiohttp
 
 SPOTIFY_CLIENT_ID = "2d3fd5ccdd3d43dda6f17864d8eb7281"
@@ -20,21 +19,24 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_secret=SPOTIFY_CLIENT_SECRET
 ))
 
-# Path to cookies file (downloaded from GitHub)
+# Path to cookies file
 COOKIES_PATH = "cookies.txt"
 
-# Ensure cookies file exists
-if not os.path.exists(COOKIES_PATH):
-    # Download cookies file from GitHub
-    async def download_cookies():
+async def ensure_cookies_file():
+    """Ensure cookies file exists, download if needed"""
+    if not os.path.exists(COOKIES_PATH):
         url = "https://raw.githubusercontent.com/J9VX/RX7/main/cookies/cookies.txt"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    with open(COOKIES_PATH, 'wb') as f:
-                        f.write(await response.read())
-    
-    asyncio.run(download_cookies())
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        with open(COOKIES_PATH, 'wb') as f:
+                            f.write(await response.read())
+                        print("Successfully downloaded cookies file")
+                    else:
+                        print(f"Failed to download cookies: HTTP {response.status}")
+        except Exception as e:
+            print(f"Error downloading cookies: {e}")
 
 # YouTube download options with cookies
 ydl_opts = {
@@ -55,9 +57,7 @@ ydl_opts = {
     'no-check-certificate': True,
     'geo-bypass': True,
     'force-ipv4': True,
-    'noplaylist': True,
-    'socket-timeout': 10,
-    'source_address': '0.0.0.0'
+    'noplaylist': True
 }
 
 async def search_spotify(query, limit=5):
@@ -89,6 +89,9 @@ async def download_youtube_audio(query):
 
 @app.on_message(filters.command(["song"]) & filters.group & ~BANNED_USERS)
 async def song_search(client, message: Message):
+    # Ensure cookies file exists
+    await ensure_cookies_file()
+    
     if len(message.command) < 2:
         return await message.reply_text("Please provide a song name to search")
     
