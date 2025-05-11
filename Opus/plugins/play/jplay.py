@@ -1,28 +1,22 @@
 import random
 import string
+import os
 
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, Message
+from pyrogram.errors import BadRequest
 
 import config
 from config import BANNED_USERS, lyrical
-# from strings import command
 from Opus import app, LOGGER
 from Opus import Platform
 from Opus.utils import seconds_to_min
 from Opus.utils.decorators.play import PlayWrapper
 from Opus.utils.inline.play import playlist_markup, track_markup
 from Opus.utils.logger import play_logs
-from Opus.utils.stream.stream import stream
 
 @app.on_message(
-    filters.command(
-        [
-            "jplay"
-        ]
-    )
-    & filters.group
-    & ~BANNED_USERS
+    filters.command(["jsong"]) & filters.group & ~BANNED_USERS
 )
 @PlayWrapper
 async def jplay_command(
@@ -45,7 +39,7 @@ async def jplay_command(
     # Check if it's a URL or search query
     if url:
         if not await Platform.saavn.valid(url):
-            return await mystic.edit_text("This is not a valid JioSaavn URL")  # ""
+            return await mystic.edit_text("This is not a valid JioSaavn URL")
         
         if await Platform.saavn.is_song(url):
             # Handle single track
@@ -59,6 +53,7 @@ async def jplay_command(
             # Check duration limit
             duration_sec = details["duration_sec"]
             if duration_sec > config.DURATION_LIMIT:
+                os.remove(file_path)  # Clean up the downloaded file
                 return await mystic.edit_text(
                     _["jplay_6"].format(
                         config.DURATION_LIMIT_MIN,
@@ -66,57 +61,35 @@ async def jplay_command(
                     )
                 )
             
-            # Prepare track details
-            track_details = {
-                "title": details["title"],
-                "duration_min": details["duration_min"],
-                "thumb": details["thumb"],
-                "filepath": file_path,
-                "vidid": f"saavn_{details['_id']}",
-                "dur": duration_sec,
-            }
-            
-            # Send track info
-            buttons = track_markup(
-                _,
-                details["_id"],
-                user_id,
-                "c" if channel else "g",
-                "f" if fplay else "d",
-            )
-            await mystic.delete()
-            await message.reply_photo(
-                photo=details["thumb"],
-                caption=_["jplay_11"].format(
-                    details["title"],
-                    details["duration_min"],
-                ),
-                reply_markup=InlineKeyboardMarkup(buttons),
-            )
-            
-            # Start streaming
             try:
-                await stream(
-                    _,
-                    None,  # No mystic needed as we already sent the message
-                    user_id,
-                    track_details,
-                    chat_id,
-                    user_name,
-                    message.chat.id,
-                    streamtype="saavn_track",
-                    forceplay=fplay,
+                # Send the audio file directly
+                await mystic.delete()
+                await message.reply_audio(
+                    audio=file_path,
+                    title=details["title"],
+                    duration=duration_sec,
+                    performer=details.get("artist", "Unknown Artist"),
+                    thumb=details["thumb"],
+                    caption=f"🎧 **Title:** {details['title']}\n⏳ **Duration:** {details['duration_min']}",
                 )
+                
+                # Clean up the file after sending
+                os.remove(file_path)
+                if os.path.exists(details["thumb"]):
+                    os.remove(details["thumb"])
+                    
+                return await play_logs(message, streamtype="JioSaavn Download")
+                
             except Exception as e:
+                # Clean up files if something went wrong
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                if "thumb" in details and os.path.exists(details["thumb"]):
+                    os.remove(details["thumb"])
+                    
                 ex_type = type(e).__name__
-                if ex_type == "AssistantErr":
-                    err = e
-                else:
-                    err = _["jgeneral_3"].format(ex_type)
-                    LOGGER(__name__).error("Stream error", exc_info=True)
-                return await message.reply_text(err)
-            
-            return await play_logs(message, streamtype="JioSaavn Track")
+                LOGGER(__name__).error("File sending error", exc_info=True)
+                return await message.reply_text(_["jgeneral_3"].format(ex_type))
         
         elif await Platform.saavn.is_playlist(url):
             # Handle playlist
@@ -154,7 +127,7 @@ async def jplay_command(
             
             return await play_logs(message, streamtype="JioSaavn Playlist")
         else:
-            return await mystic.edit_text("podcasts are not supported")  # "Shows/podcasts are not supported"
+            return await mystic.edit_text("Podcasts are not supported")
     
     else:
         # Handle search query
@@ -179,6 +152,7 @@ async def jplay_command(
             # Check duration
             duration_sec = full_details["duration_sec"]
             if duration_sec > config.DURATION_LIMIT:
+                os.remove(file_path)
                 return await mystic.edit_text(
                     _["jplay_6"].format(
                         config.DURATION_LIMIT_MIN,
@@ -186,57 +160,35 @@ async def jplay_command(
                     )
                 )
             
-            # Prepare track details
-            track_details = {
-                "title": full_details["title"],
-                "duration_min": full_details["duration_min"],
-                "thumb": full_details["thumb"],
-                "filepath": file_path,
-                "vidid": f"saavn_{full_details['_id']}",
-                "dur": duration_sec,
-            }
-            
-            # Send track info
-            buttons = track_markup(
-                _,
-                full_details["_id"],
-                user_id,
-                "c" if channel else "g",
-                "f" if fplay else "d",
-            )
-            await mystic.delete()
-            await message.reply_photo(
-                photo=full_details["thumb"],
-                caption=_["jplay_11"].format(
-                    full_details["title"],
-                    full_details["duration_min"],
-                ),
-                reply_markup=InlineKeyboardMarkup(buttons),
-            )
-            
-            # Start streaming
             try:
-                await stream(
-                    _,
-                    None,
-                    user_id,
-                    track_details,
-                    chat_id,
-                    user_name,
-                    message.chat.id,
-                    streamtype="saavn_track",
-                    forceplay=fplay,
+                # Send the audio file directly
+                await mystic.delete()
+                await message.reply_audio(
+                    audio=file_path,
+                    title=full_details["title"],
+                    duration=duration_sec,
+                    performer=full_details.get("artist", "Unknown Artist"),
+                    thumb=full_details["thumb"],
+                    caption=f"🎧 **Title:** {full_details['title']}\n⏳ **Duration:** {full_details['duration_min']}",
                 )
+                
+                # Clean up the file after sending
+                os.remove(file_path)
+                if os.path.exists(full_details["thumb"]):
+                    os.remove(full_details["thumb"])
+                    
+                return await play_logs(message, streamtype="JioSaavn Search Download")
+                
             except Exception as e:
+                # Clean up files if something went wrong
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                if "thumb" in full_details and os.path.exists(full_details["thumb"]):
+                    os.remove(full_details["thumb"])
+                    
                 ex_type = type(e).__name__
-                if ex_type == "AssistantErr":
-                    err = e
-                else:
-                    err = _["jgeneral_3"].format(ex_type)
-                    LOGGER(__name__).error("Stream error", exc_info=True)
-                return await message.reply_text(err)
-            
-            return await play_logs(message, streamtype="JioSaavn Search")
+                LOGGER(__name__).error("File sending error", exc_info=True)
+                return await message.reply_text(_["jgeneral_3"].format(ex_type))
         
         except Exception as e:
             ex_type = type(e).__name__
