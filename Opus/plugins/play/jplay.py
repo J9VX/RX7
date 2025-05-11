@@ -7,8 +7,9 @@ from pyrogram.types import InlineKeyboardMarkup, Message
 import config
 from config import BANNED_USERS, lyrical
 from strings import command
-from Opus import app, LOGGER, Platform
-from Opus.utils import seconds_to_min
+from Opus import app, LOGGER
+from Opus import JioSavan
+from Opus.utils import seconds_to_min, time_to_seconds
 from Opus.utils.decorators.play import PlayWrapper
 from Opus.utils.inline.play import playlist_markup, track_markup
 from Opus.utils.logger import play_logs
