@@ -8,7 +8,7 @@ import config
 from config import BANNED_USERS, lyrical
 # from strings import command
 from Opus import app, LOGGER
-from Opus import JioSavan as Platform
+from Opus import Platform
 from Opus.utils import seconds_to_min
 from Opus.utils.decorators.play import PlayWrapper
 from Opus.utils.inline.play import playlist_markup, track_markup
